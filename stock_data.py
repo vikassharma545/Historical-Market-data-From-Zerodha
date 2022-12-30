@@ -64,8 +64,8 @@ class stock_data:
             year_data = self.get_year_data(stock_name, year)
             data = pd.concat([data, year_data], ignore_index=True)
 
-        data.sort_values(by=['date_time'], inplace=True)
+        data.sort_values(by=['Date Time'], inplace=True)
         data.drop_duplicates(inplace=True)
-        data = data[data.date_time < pd.Timestamp.combine(pd.Timestamp.now().date(), datetime.time(15, 30))]
+        data = data[data['Date Time'] < pd.Timestamp.combine(pd.Timestamp.now().date(), datetime.time(15, 30))]
         data.to_csv(f'{stock_name} {from_year} to {to_year}.csv', index=False)
         return data
