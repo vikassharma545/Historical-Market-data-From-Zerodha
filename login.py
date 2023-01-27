@@ -5,52 +5,54 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 
-class login:
+
+class Login:
     # Private Variable
     __base_url = 'https://kite.zerodha.com'
-    ___user_id = ''
-    __password = ''
-    __totp = ''
+    __enc_cookies = None
 
-    # public Variable
-    enc_cookies = None
-
-    def __init__(self, user_id, password, totp=None):
+    def __init__(self, user_id=None, password=None, totp=None):
         """
-        Login Account For download data
+        Login Account For saving cookies to accessing zerodha data
         """
-        self.___user_id = user_id
-        self.__password = password
-        self.__totp = totp
 
         driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
         driver.implicitly_wait(3)
         driver.get(self.__base_url)
-        driver.find_element(By.XPATH, "//input[@id='userid']").send_keys(self.___user_id)
-        driver.find_element(By.XPATH, "//input[@id='password']").send_keys(self.__password)
-        driver.find_element(By.XPATH, "//button[normalize-space()='Login']").click()
-        sleep(3)
 
-        if totp != None:
-            driver.find_element(By.XPATH, "//input[@type='text']").send_keys(self.__totp)
-            sleep(1)
-            driver.find_element(By.XPATH, "//button[normalize-space()='Continue']").click()
+        if user_id is not None:
+            driver.find_element(By.XPATH, "//input[@id='userid']").send_keys(user_id)
+
+        if password is not None:
+            driver.find_element(By.XPATH, "//input[@id='password']").send_keys(password)
+
+        if user_id is not None and password is not None:
+            driver.find_element(By.XPATH, "//button[normalize-space()='Login']").click()
+
+            sleep(3)
+
+            if totp is not None:
+                driver.find_element(By.XPATH, "//input[@type='text']").send_keys(totp)
 
         sleep(3)
         login_success = False
-        for _ in range(40):
 
+        for _ in range(40):
             # get enctoken
             cookies_data = pd.DataFrame(driver.get_cookies()).set_index('name')
             if 'enctoken' in cookies_data.index:
-                self.enc_cookies = cookies_data.loc['enctoken', 'value']
+                self.__enc_cookies = cookies_data.loc['enctoken', 'value']
                 login_success = True
                 break
             sleep(5)
 
         driver.close()
 
-        if login_success:
-            print('Login Successfull :)')
+        print('Login Successfull :)') if login_success else print('Something Wrong !!!')
+
+    def get_enc_cookie(self):
+        if self.__enc_cookies is None:
+            print('Login Again !!!')
+            return self.__enc_cookies
         else:
-            print('Something Wrong !!!')
+            return self.__enc_cookies
