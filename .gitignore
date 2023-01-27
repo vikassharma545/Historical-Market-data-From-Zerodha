@@ -1,4 +1,3 @@
-*.ipynb
 .idea
 _pycache
 test.ipynb
