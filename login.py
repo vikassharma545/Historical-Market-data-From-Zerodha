@@ -1,4 +1,4 @@
-import totp
+import pyotp
 import pandas as pd
 from time import sleep
 from selenium import webdriver
