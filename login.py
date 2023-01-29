@@ -1,3 +1,4 @@
+import totp
 import pandas as pd
 from time import sleep
 from selenium import webdriver
@@ -11,7 +12,7 @@ class Login:
     __base_url = 'https://kite.zerodha.com'
     __enc_cookies = None
 
-    def __init__(self, user_id=None, password=None, totp=None):
+    def __init__(self, user_id=None, password=None, totp_key=None):
         """
         Login Account For saving cookies to accessing zerodha data
         """
@@ -31,7 +32,8 @@ class Login:
 
             sleep(3)
 
-            if totp is not None:
+            if totp_key is not None:
+                totp = pyotp.TOTP(totp_key).now()
                 driver.find_element(By.XPATH, "//input[@type='text']").send_keys(totp)
 
         sleep(3)
