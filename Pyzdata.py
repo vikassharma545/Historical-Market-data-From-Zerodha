@@ -2,25 +2,30 @@ import pyotp
 import datetime
 import requests
 import pandas as pd
+from enum import Enum
+
+class interval(Enum):
+    
+    minute1 = 'minute'
+    minute2 = '2minute'
+    minute3 = '3minute'
+    minute4 = '4minute'
+    minute5 = '5minute'
+    minute10 = '10minute'
+    minute15 = '15minute'
+    minute30 = '30minute'
+    hour1 = '60minute'
+    hour2 = '2hour'
+    hour3 = '3hour'
+    hour4 = '4hour'
+    day = 'day'
 
 class pyzdata:
+    
+    __root_url = "https://api.kite.trade"
+    __market_historical_url = "/instruments/historical/{instrument_token}/{interval}"
 
-    class __interval:
-        minute_1 = 'minute'
-        minute_2 = '2minute'
-        minute_3 = '3minute'
-        minute_4 = '4minute'
-        minute_5 = '5minute'
-        minute_10 = '10minute'
-        minute_15 = '15minute'
-        minute_30 = '30minute'
-        hour_1 = '60minute'
-        hour_2 = '2hour'
-        hour_3 = '3hour'
-        hour_4 = '4hour'
-        day = 'day'
-
-    def __init__(self, userid='', password='', twofa='', key_type="totp", enctoken=None):
+    def __init__(self, userid:str, password:str, totp:int):
         """
         Initialise a new pykite client instance.
 
@@ -29,53 +34,38 @@ class pyzdata:
         :param twofa: Totp/PIN/TotpKey
         :param key_type: {'totp','pin','totpkey'}, default 'totp'
 
-        or
-
-        :param enctoken: you can directly pass enctoken from browser
-
         """
 
         self.__session = requests.session()
-        self.__root_url = "https://api.kite.trade"
         self.__login_url = "https://kite.zerodha.com/api"
-        self.__market_historical_url = "/instruments/historical/{instrument_token}/{interval}"
 
-        if enctoken is None:
+        # login
+        data = {"user_id": userid, "password": password}
+        response = self.__session.post(f"{self.__login_url}/login", data=data)
+        if response.status_code != 200:
+            raise Exception(response.json())
 
-            # login
-            data = {"user_id": userid, "password": password}
-            response = self.__session.post(f"{self.__login_url}/login", data=data)
-            if response.status_code != 200:
-                raise Exception(response.json())
+        data = {
+            "request_id": response.json()['data']['request_id'],
+            "twofa_value": totp,
+            "user_id": response.json()['data']['user_id']
+        }
 
-            # verify twofa
-            if key_type == "totpkey":
-                twofa = pyotp.TOTP(twofa).now()
+        response = self.__session.post(f"{self.__login_url}/twofa", data=data)
 
-            data = {
-                "request_id": response.json()['data']['request_id'],
-                "twofa_value": twofa,
-                "user_id": response.json()['data']['user_id']
-            }
+        if response.status_code != 200:
+            raise Exception(response.json())
 
-            response = self.__session.post(f"{self.__login_url}/twofa", data=data)
+        self.__enctoken = response.cookies.get('enctoken')
 
-            if response.status_code != 200:
-                raise Exception(response.json())
-
-            self.__enctoken = response.cookies.get('enctoken')
-
-            if self.__enctoken is None:
-                raise Exception("Invalid detail. !!!")
-
-        else:
-            self.__enctoken = enctoken
+        if self.__enctoken is None:
+            raise Exception("Invalid detail. !!!")
 
         self.__header = {"Authorization": f"enctoken {self.__enctoken}"}
-        self.interval = self.__interval()
+        self.interval = interval
         self.instrument_data = pd.read_csv("https://api.kite.trade/instruments")
 
-    def get_instrument_token(self, tradingsymbol, exchange):
+    def get_instrument_token(self, tradingsymbol:str, exchange:str):
 
         try:
             condition1 = (self.instrument_data['tradingsymbol'] == tradingsymbol)
@@ -85,7 +75,7 @@ class pyzdata:
         except:
             raise Exception("instrument token not found !!!")
 
-    def __get_trading_symbol(self, instrument_token):
+    def __get_trading_symbol(self, instrument_token:int):
         try:
             tradingsymbol = self.instrument_data[self.instrument_data['instrument_token'] == instrument_token]['tradingsymbol'].iloc[0]
             return tradingsymbol
@@ -93,7 +83,7 @@ class pyzdata:
             raise Exception("Instrument token not found !!!")
 
 
-    def get_month_data(self, instrument_token, year, month, interval="minute", continuous=False, oi=False, print_statement=False):
+    def get_month_data(self, instrument_token:int, year:int, month:int, interval:interval, oi=False, print_statement=False):
 
         """
             Retrieve historical data (candles) for an instrument.
@@ -117,12 +107,11 @@ class pyzdata:
         params = {
             "from": from_date_string,
             "to": to_date_string,
-            "interval": interval,
-            "continuous": 1 if continuous else 0,
-            "oi": 1 if oi else 0
+            "oi": int(oi)
         }
-
-        response = self.__session.get(f"{self.__root_url}{self.__market_historical_url.format(instrument_token=instrument_token, interval=interval)}", params=params, headers=self.__header).json()
+        
+        URL = f"{self.__root_url}{self.__market_historical_url.format(instrument_token=instrument_token, interval=interval.value)}"
+        response = self.__session.get(URL, params=params, headers=self.__header).json()
 
         if response['status'] == 'success':
             data = pd.DataFrame(response['data']['candles'])
@@ -148,21 +137,21 @@ class pyzdata:
         else:
             return pd.DataFrame()
 
-    def get_year_data(self, instrument_token, year, interval="minute", continuous=False, oi=False, print_statement=False):
+    def get_year_data(self, instrument_token:int, year:int, interval:interval, continuous=False, oi=False, print_statement=False):
         data = pd.DataFrame()
 
         for month in range(1, 13):
-            monthly_data = self.get_month_data(instrument_token, year, month, interval, continuous, oi, print_statement)
+            monthly_data = self.get_month_data(instrument_token, year, month, interval, oi, print_statement)
             data = pd.concat([data, monthly_data], ignore_index=True)
 
         return data
 
-    def download_data_from_year(self, instrument_token, from_year, interval="minute", continuous=False, oi=False, print_statement=False):
+    def download_data_from_year(self, instrument_token:int, from_year:int, interval:interval, oi=False, print_statement=False):
         print('Downloading...')
         to_year, data = pd.Timestamp.now().year, pd.DataFrame()
 
         for year in range(from_year, to_year + 1):
-            year_data = self.get_year_data(instrument_token, year, interval, continuous, oi, print_statement)
+            year_data = self.get_year_data(instrument_token, year, interval, oi, print_statement)
             data = pd.concat([data, year_data], ignore_index=True)
 
         data.sort_values(by=['datetime'], inplace=True)

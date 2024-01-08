@@ -11,14 +11,7 @@ from Pyzdata import pyzdata
 
 
 ```python
-# Method - 1
-zdata = pyzdata(userid="userid", password="password", twofa="twofa", key_type="totp")
-```
-
-
-```python
-# Method - 2
-zdata = pyzdata(enctoken="enctoken")
+zdata = pyzdata(userid="USERID", password="PASSWORD", totp=123456)
 ```
 
 # Instrument token
@@ -26,19 +19,32 @@ zdata = pyzdata(enctoken="enctoken")
 
 ```python
 # Get instrument token for given trading symbol
-instrument_token = zdata.get_instrument_token(tradingsymbol="HDFC", exchange="NSE")
+instrument_token = zdata.get_instrument_token(tradingsymbol="SBIN", exchange="NSE")
 ```
 
 # Monthly Data
 
 
 ```python
-df = zdata.get_month_data(instrument_token, year=2020, month=1, interval=zdata.interval.hour_1, oi=True)
+df = zdata.get_month_data(instrument_token, year=2023, month=2, interval=zdata.interval.minute1, oi=False)
 display(df)
 ```
 
 
 <div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
 <table border="1" class="dataframe">
   <thead>
     <tr style="text-align: right;">
@@ -50,64 +56,58 @@ display(df)
       <th>low</th>
       <th>close</th>
       <th>volume</th>
-      <th>open_interest</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <th>0</th>
-      <td>HDFC</td>
-      <td>2020-01-01 09:15:00</td>
-      <td>2418.00</td>
-      <td>2423.90</td>
-      <td>2409.00</td>
-      <td>2412.55</td>
-      <td>198613</td>
-      <td>0</td>
+      <td>SBIN</td>
+      <td>2023-02-01 09:15:00</td>
+      <td>561.40</td>
+      <td>561.80</td>
+      <td>557.80</td>
+      <td>558.70</td>
+      <td>362695</td>
     </tr>
     <tr>
       <th>1</th>
-      <td>HDFC</td>
-      <td>2020-01-01 10:15:00</td>
-      <td>2412.55</td>
-      <td>2429.80</td>
-      <td>2410.00</td>
-      <td>2424.70</td>
-      <td>157818</td>
-      <td>0</td>
+      <td>SBIN</td>
+      <td>2023-02-01 09:16:00</td>
+      <td>558.30</td>
+      <td>559.50</td>
+      <td>558.10</td>
+      <td>559.05</td>
+      <td>215450</td>
     </tr>
     <tr>
       <th>2</th>
-      <td>HDFC</td>
-      <td>2020-01-01 11:15:00</td>
-      <td>2424.80</td>
-      <td>2425.60</td>
-      <td>2420.00</td>
-      <td>2424.75</td>
-      <td>58640</td>
-      <td>0</td>
+      <td>SBIN</td>
+      <td>2023-02-01 09:17:00</td>
+      <td>558.65</td>
+      <td>559.15</td>
+      <td>558.20</td>
+      <td>559.15</td>
+      <td>171662</td>
     </tr>
     <tr>
       <th>3</th>
-      <td>HDFC</td>
-      <td>2020-01-01 12:15:00</td>
-      <td>2424.75</td>
-      <td>2429.90</td>
-      <td>2424.00</td>
-      <td>2426.55</td>
-      <td>105438</td>
-      <td>0</td>
+      <td>SBIN</td>
+      <td>2023-02-01 09:18:00</td>
+      <td>559.10</td>
+      <td>560.20</td>
+      <td>559.00</td>
+      <td>560.05</td>
+      <td>153677</td>
     </tr>
     <tr>
       <th>4</th>
-      <td>HDFC</td>
-      <td>2020-01-01 13:15:00</td>
-      <td>2426.50</td>
-      <td>2433.80</td>
-      <td>2425.00</td>
-      <td>2430.40</td>
-      <td>94888</td>
-      <td>0</td>
+      <td>SBIN</td>
+      <td>2023-02-01 09:19:00</td>
+      <td>560.00</td>
+      <td>560.10</td>
+      <td>559.70</td>
+      <td>560.00</td>
+      <td>131938</td>
     </tr>
     <tr>
       <th>...</th>
@@ -118,66 +118,60 @@ display(df)
       <td>...</td>
       <td>...</td>
       <td>...</td>
-      <td>...</td>
     </tr>
     <tr>
-      <th>149</th>
-      <td>HDFC</td>
-      <td>2020-01-30 11:15:00</td>
-      <td>2424.05</td>
-      <td>2424.90</td>
-      <td>2408.05</td>
-      <td>2413.00</td>
-      <td>240059</td>
-      <td>0</td>
+      <th>7120</th>
+      <td>SBIN</td>
+      <td>2023-02-27 15:25:00</td>
+      <td>527.50</td>
+      <td>527.50</td>
+      <td>527.40</td>
+      <td>527.50</td>
+      <td>38693</td>
     </tr>
     <tr>
-      <th>150</th>
-      <td>HDFC</td>
-      <td>2020-01-30 12:15:00</td>
-      <td>2413.10</td>
-      <td>2422.40</td>
-      <td>2408.70</td>
-      <td>2411.40</td>
-      <td>229149</td>
-      <td>0</td>
+      <th>7121</th>
+      <td>SBIN</td>
+      <td>2023-02-27 15:26:00</td>
+      <td>527.50</td>
+      <td>528.00</td>
+      <td>527.00</td>
+      <td>527.35</td>
+      <td>128062</td>
     </tr>
     <tr>
-      <th>151</th>
-      <td>HDFC</td>
-      <td>2020-01-30 13:15:00</td>
-      <td>2411.35</td>
-      <td>2417.00</td>
-      <td>2406.35</td>
-      <td>2410.45</td>
-      <td>334411</td>
-      <td>0</td>
+      <th>7122</th>
+      <td>SBIN</td>
+      <td>2023-02-27 15:27:00</td>
+      <td>527.20</td>
+      <td>527.35</td>
+      <td>526.90</td>
+      <td>527.10</td>
+      <td>77312</td>
     </tr>
     <tr>
-      <th>152</th>
-      <td>HDFC</td>
-      <td>2020-01-30 14:15:00</td>
-      <td>2410.45</td>
-      <td>2427.75</td>
-      <td>2407.90</td>
-      <td>2411.55</td>
-      <td>675028</td>
-      <td>0</td>
+      <th>7123</th>
+      <td>SBIN</td>
+      <td>2023-02-27 15:28:00</td>
+      <td>527.10</td>
+      <td>527.45</td>
+      <td>527.05</td>
+      <td>527.20</td>
+      <td>47078</td>
     </tr>
     <tr>
-      <th>153</th>
-      <td>HDFC</td>
-      <td>2020-01-30 15:15:00</td>
-      <td>2411.60</td>
-      <td>2413.60</td>
-      <td>2409.45</td>
-      <td>2411.00</td>
-      <td>336853</td>
-      <td>0</td>
+      <th>7124</th>
+      <td>SBIN</td>
+      <td>2023-02-27 15:29:00</td>
+      <td>527.50</td>
+      <td>527.55</td>
+      <td>527.30</td>
+      <td>527.50</td>
+      <td>83278</td>
     </tr>
   </tbody>
 </table>
-<p>154 rows × 8 columns</p>
+<p>7125 rows × 7 columns</p>
 </div>
 
 
@@ -185,12 +179,25 @@ display(df)
 
 
 ```python
-df = zdata.get_year_data(instrument_token, year=2021, interval=zdata.interval.minute_30)
+df = zdata.get_year_data(instrument_token, year=2021, interval=zdata.interval.minute30)
 display(df)
 ```
 
 
 <div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
 <table border="1" class="dataframe">
   <thead>
     <tr style="text-align: right;">
@@ -207,53 +214,53 @@ display(df)
   <tbody>
     <tr>
       <th>0</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-01-01 09:15:00</td>
-      <td>2549.00</td>
-      <td>2575.75</td>
-      <td>2541.45</td>
-      <td>2574.45</td>
-      <td>294335</td>
+      <td>274.90</td>
+      <td>278.05</td>
+      <td>274.50</td>
+      <td>277.75</td>
+      <td>4306013</td>
     </tr>
     <tr>
       <th>1</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-01-01 09:45:00</td>
-      <td>2575.65</td>
-      <td>2593.30</td>
-      <td>2574.25</td>
-      <td>2583.00</td>
-      <td>412409</td>
+      <td>277.75</td>
+      <td>278.50</td>
+      <td>277.20</td>
+      <td>277.45</td>
+      <td>2394262</td>
     </tr>
     <tr>
       <th>2</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-01-01 10:15:00</td>
-      <td>2583.00</td>
-      <td>2589.00</td>
-      <td>2578.05</td>
-      <td>2579.50</td>
-      <td>146993</td>
+      <td>277.40</td>
+      <td>277.70</td>
+      <td>276.75</td>
+      <td>277.25</td>
+      <td>1312581</td>
     </tr>
     <tr>
       <th>3</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-01-01 10:45:00</td>
-      <td>2579.60</td>
-      <td>2582.00</td>
-      <td>2570.00</td>
-      <td>2572.10</td>
-      <td>139784</td>
+      <td>277.20</td>
+      <td>277.90</td>
+      <td>277.20</td>
+      <td>277.75</td>
+      <td>854730</td>
     </tr>
     <tr>
       <th>4</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-01-01 11:15:00</td>
-      <td>2572.10</td>
-      <td>2573.00</td>
-      <td>2563.00</td>
-      <td>2563.85</td>
-      <td>110675</td>
+      <td>277.75</td>
+      <td>278.20</td>
+      <td>277.50</td>
+      <td>277.70</td>
+      <td>1133743</td>
     </tr>
     <tr>
       <th>...</th>
@@ -267,53 +274,53 @@ display(df)
     </tr>
     <tr>
       <th>3099</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-12-30 13:15:00</td>
-      <td>2571.95</td>
-      <td>2577.30</td>
-      <td>2570.00</td>
-      <td>2571.75</td>
-      <td>101377</td>
+      <td>453.65</td>
+      <td>453.75</td>
+      <td>452.10</td>
+      <td>453.25</td>
+      <td>455789</td>
     </tr>
     <tr>
       <th>3100</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-12-30 13:45:00</td>
-      <td>2571.80</td>
-      <td>2574.20</td>
-      <td>2565.70</td>
-      <td>2572.65</td>
-      <td>77884</td>
+      <td>453.25</td>
+      <td>453.75</td>
+      <td>451.55</td>
+      <td>451.65</td>
+      <td>520563</td>
     </tr>
     <tr>
       <th>3101</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-12-30 14:15:00</td>
-      <td>2572.60</td>
-      <td>2579.15</td>
-      <td>2569.00</td>
-      <td>2573.90</td>
-      <td>101123</td>
+      <td>451.65</td>
+      <td>452.00</td>
+      <td>448.55</td>
+      <td>449.05</td>
+      <td>1760595</td>
     </tr>
     <tr>
       <th>3102</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-12-30 14:45:00</td>
-      <td>2574.30</td>
-      <td>2574.65</td>
-      <td>2555.00</td>
-      <td>2569.15</td>
-      <td>335713</td>
+      <td>449.05</td>
+      <td>452.80</td>
+      <td>448.50</td>
+      <td>452.50</td>
+      <td>11066556</td>
     </tr>
     <tr>
       <th>3103</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2021-12-30 15:15:00</td>
-      <td>2569.10</td>
-      <td>2576.95</td>
-      <td>2560.80</td>
-      <td>2570.00</td>
-      <td>259494</td>
+      <td>452.45</td>
+      <td>453.85</td>
+      <td>451.10</td>
+      <td>453.05</td>
+      <td>8562346</td>
     </tr>
   </tbody>
 </table>
@@ -332,52 +339,23 @@ display(df)
 ```
 
     Downloading...
-    HDFC data from 2020-01-01 to 2020-01-31 Fetched :)
-    HDFC data from 2020-02-01 to 2020-02-29 Fetched :)
-    HDFC data from 2020-03-01 to 2020-03-31 Fetched :)
-    HDFC data from 2020-04-01 to 2020-04-30 Fetched :)
-    HDFC data from 2020-05-01 to 2020-05-31 Fetched :)
-    HDFC data from 2020-06-01 to 2020-06-30 Fetched :)
-    HDFC data from 2020-07-01 to 2020-07-31 Fetched :)
-    HDFC data from 2020-08-01 to 2020-08-31 Fetched :)
-    HDFC data from 2020-09-01 to 2020-09-30 Fetched :)
-    HDFC data from 2020-10-01 to 2020-10-31 Fetched :)
-    HDFC data from 2020-11-01 to 2020-11-30 Fetched :)
-    HDFC data from 2020-12-01 to 2020-12-31 Fetched :)
-    HDFC data from 2021-01-01 to 2021-01-31 Fetched :)
-    HDFC data from 2021-02-01 to 2021-02-28 Fetched :)
-    HDFC data from 2021-03-01 to 2021-03-31 Fetched :)
-    HDFC data from 2021-04-01 to 2021-04-30 Fetched :)
-    HDFC data from 2021-05-01 to 2021-05-31 Fetched :)
-    HDFC data from 2021-06-01 to 2021-06-30 Fetched :)
-    HDFC data from 2021-07-01 to 2021-07-31 Fetched :)
-    HDFC data from 2021-08-01 to 2021-08-31 Fetched :)
-    HDFC data from 2021-09-01 to 2021-09-30 Fetched :)
-    HDFC data from 2021-10-01 to 2021-10-31 Fetched :)
-    HDFC data from 2021-11-01 to 2021-11-30 Fetched :)
-    HDFC data from 2021-12-01 to 2021-12-31 Fetched :)
-    HDFC data from 2022-01-01 to 2022-01-31 Fetched :)
-    HDFC data from 2022-02-01 to 2022-02-28 Fetched :)
-    HDFC data from 2022-03-01 to 2022-03-31 Fetched :)
-    HDFC data from 2022-04-01 to 2022-04-30 Fetched :)
-    HDFC data from 2022-05-01 to 2022-05-31 Fetched :)
-    HDFC data from 2022-06-01 to 2022-06-30 Fetched :)
-    HDFC data from 2022-07-01 to 2022-07-31 Fetched :)
-    HDFC data from 2022-08-01 to 2022-08-31 Fetched :)
-    HDFC data from 2022-09-01 to 2022-09-30 Fetched :)
-    HDFC data from 2022-10-01 to 2022-10-31 Fetched :)
-    HDFC data from 2022-11-01 to 2022-11-30 Fetched :)
-    HDFC data from 2022-12-01 to 2022-12-31 Fetched :)
-    HDFC data from 2023-01-01 to 2023-01-31 Fetched :)
-    HDFC data from 2023-02-01 to 2023-02-28 Fetched :)
-    HDFC data from 2023-03-01 to 2023-03-31 Fetched :)
-    HDFC data from 2023-04-01 to 2023-04-30 Fetched :)
-    HDFC data from 2023-05-01 to 2023-05-31 Fetched :)
-    HDFC data from 2023-06-01 to 2023-06-30 Fetched :)
     
 
 
 <div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
 <table border="1" class="dataframe">
   <thead>
     <tr style="text-align: right;">
@@ -389,58 +367,64 @@ display(df)
       <th>low</th>
       <th>close</th>
       <th>volume</th>
+      <th>open_interest</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <th>0</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2020-01-01</td>
-      <td>2418.00</td>
-      <td>2438.50</td>
-      <td>2409.00</td>
-      <td>2433.95</td>
-      <td>945874</td>
+      <td>334.70</td>
+      <td>335.95</td>
+      <td>332.15</td>
+      <td>334.45</td>
+      <td>17379320</td>
+      <td>0</td>
     </tr>
     <tr>
       <th>1</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2020-01-02</td>
-      <td>2430.00</td>
-      <td>2472.75</td>
-      <td>2422.00</td>
-      <td>2466.40</td>
-      <td>1701396</td>
+      <td>334.50</td>
+      <td>339.85</td>
+      <td>333.35</td>
+      <td>339.30</td>
+      <td>20324236</td>
+      <td>0</td>
     </tr>
     <tr>
       <th>2</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2020-01-03</td>
-      <td>2455.00</td>
-      <td>2466.40</td>
-      <td>2441.80</td>
-      <td>2454.45</td>
-      <td>1963923</td>
+      <td>337.95</td>
+      <td>337.95</td>
+      <td>332.00</td>
+      <td>333.70</td>
+      <td>21853208</td>
+      <td>0</td>
     </tr>
     <tr>
       <th>3</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2020-01-06</td>
-      <td>2428.00</td>
-      <td>2445.00</td>
-      <td>2371.40</td>
-      <td>2384.10</td>
-      <td>2656731</td>
+      <td>331.70</td>
+      <td>331.70</td>
+      <td>317.70</td>
+      <td>319.00</td>
+      <td>35645325</td>
+      <td>0</td>
     </tr>
     <tr>
       <th>4</th>
-      <td>HDFC</td>
+      <td>SBIN</td>
       <td>2020-01-07</td>
-      <td>2401.25</td>
-      <td>2428.80</td>
-      <td>2380.20</td>
-      <td>2415.05</td>
-      <td>3771992</td>
+      <td>324.45</td>
+      <td>327.00</td>
+      <td>315.40</td>
+      <td>318.40</td>
+      <td>50966826</td>
+      <td>0</td>
     </tr>
     <tr>
       <th>...</th>
@@ -451,64 +435,64 @@ display(df)
       <td>...</td>
       <td>...</td>
       <td>...</td>
+      <td>...</td>
     </tr>
     <tr>
-      <th>851</th>
-      <td>HDFC</td>
-      <td>2023-06-05</td>
-      <td>2658.00</td>
-      <td>2661.90</td>
-      <td>2642.00</td>
-      <td>2644.80</td>
-      <td>4714971</td>
+      <th>995</th>
+      <td>SBIN</td>
+      <td>2024-01-02</td>
+      <td>641.35</td>
+      <td>648.00</td>
+      <td>633.85</td>
+      <td>639.45</td>
+      <td>15164482</td>
+      <td>0</td>
     </tr>
     <tr>
-      <th>852</th>
-      <td>HDFC</td>
-      <td>2023-06-06</td>
-      <td>2645.95</td>
-      <td>2649.00</td>
-      <td>2624.85</td>
-      <td>2635.35</td>
-      <td>4846536</td>
+      <th>996</th>
+      <td>SBIN</td>
+      <td>2024-01-03</td>
+      <td>639.35</td>
+      <td>648.00</td>
+      <td>635.80</td>
+      <td>643.45</td>
+      <td>14571772</td>
+      <td>0</td>
     </tr>
     <tr>
-      <th>853</th>
-      <td>HDFC</td>
-      <td>2023-06-07</td>
-      <td>2642.75</td>
-      <td>2655.00</td>
-      <td>2631.60</td>
-      <td>2648.55</td>
-      <td>2694134</td>
+      <th>997</th>
+      <td>SBIN</td>
+      <td>2024-01-04</td>
+      <td>642.50</td>
+      <td>646.40</td>
+      <td>638.65</td>
+      <td>642.75</td>
+      <td>13883388</td>
+      <td>0</td>
     </tr>
     <tr>
-      <th>854</th>
-      <td>HDFC</td>
-      <td>2023-06-08</td>
-      <td>2636.10</td>
-      <td>2678.00</td>
-      <td>2636.10</td>
-      <td>2653.80</td>
-      <td>2072748</td>
+      <th>998</th>
+      <td>SBIN</td>
+      <td>2024-01-05</td>
+      <td>645.00</td>
+      <td>651.75</td>
+      <td>637.75</td>
+      <td>641.95</td>
+      <td>15984585</td>
+      <td>0</td>
     </tr>
     <tr>
-      <th>855</th>
-      <td>HDFC</td>
-      <td>2023-06-09</td>
-      <td>2664.00</td>
-      <td>2667.90</td>
-      <td>2646.85</td>
-      <td>2652.90</td>
-      <td>4348281</td>
+      <th>999</th>
+      <td>SBIN</td>
+      <td>2024-01-08</td>
+      <td>640.00</td>
+      <td>645.00</td>
+      <td>625.05</td>
+      <td>627.00</td>
+      <td>14689705</td>
+      <td>0</td>
     </tr>
   </tbody>
 </table>
-<p>856 rows × 7 columns</p>
+<p>1000 rows × 8 columns</p>
 </div>
-
-
-
-```python
-
-```
