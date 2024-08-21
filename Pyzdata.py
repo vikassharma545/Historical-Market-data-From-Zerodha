@@ -22,7 +22,7 @@ class interval(Enum):
 
 class pyzdata:
     
-    __root_url = "https://api.kite.trade"
+    __root_url = "https://kite.zerodha.com/oms"
     __market_historical_url = "/instruments/historical/{instrument_token}/{interval}"
 
     def __init__(self, userid:str, password:str, totp:int):
