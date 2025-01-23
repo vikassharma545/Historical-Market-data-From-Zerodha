@@ -193,7 +193,7 @@ class PyZData:
 
         data = pd.concat(yearly_data_list, ignore_index=True)
         data.drop_duplicates(inplace=True)
-        filename = f"{self.__get_trading_symbol(instrument_token)}_{from_year}_to_{to_year}_{interval.value}.csv"
+        filename = f"{self.__get_trading_symbol(instrument_token)} {from_year} to {to_year} Interval-{interval.value.upper()}.csv"
         data.to_csv(filename, index=False)
 
         if print_logs:
