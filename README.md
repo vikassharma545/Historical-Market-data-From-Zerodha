@@ -52,34 +52,6 @@ print(df.head())
 
 ---
 
-## 🔐 Authentication
-
-This tool logs in using **enctoken** via:
-- `user_id`
-- `password`
-- `TOTP` (Google Authenticator 6-digit)
-
-It **does not use the official Zerodha KiteConnect token**.
-
----
-
-## 📈 Popularity (Live badges)
-
-- **Repo Stars**: ![Stars](https://img.shields.io/github/stars/vikassharma545/Historical-Market-data-From-Zerodha?style=social)
-- **Forks**: ![Forks](https://img.shields.io/github/forks/vikassharma545/Historical-Market-data-From-Zerodha?style=social)
-
----
-
-## 👨‍💻 Contributing
-
-Pull requests and issues are welcome!
-
-1. Fork this repo
-2. Make your changes
-3. Submit a PR
-
----
-
 ## 📝 License
 
 This project is licensed under the [MIT License](LICENSE).
