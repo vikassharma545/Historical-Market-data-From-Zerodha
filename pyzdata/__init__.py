@@ -1,1 +1,1 @@
-from .pyzdata import PyZData, Interval
+from .PyZData import *
