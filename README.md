@@ -1,5 +1,5 @@
 
-# 📊 PyZData – Historical Market Data Downloader from Zerodha
+# 📊 PyZData – Market Data Downloader from Zerodha
 
 ![GitHub repo size](https://img.shields.io/github/repo-size/vikassharma545/Historical-Market-data-From-Zerodha)
 ![GitHub last commit](https://img.shields.io/github/last-commit/vikassharma545/Historical-Market-data-From-Zerodha)
