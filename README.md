@@ -52,21 +52,6 @@ print(df.head())
 
 ---
 
-## 📂 Project Structure
-
-```
-pyzdata/
-│   ├── __init__.py       # Exports the PyZData interface
-│   └── pyzdata.py        # Core logic: login, retry, fetch, parse
-notebooks/
-│   └── Jupyter_file.ipynb  # Example usage with plots (WIP)
-setup.py
-README.md
-LICENSE
-```
-
----
-
 ## 🔐 Authentication
 
 This tool logs in using **enctoken** via:
@@ -82,7 +67,6 @@ It **does not use the official Zerodha KiteConnect token**.
 
 - **Repo Stars**: ![Stars](https://img.shields.io/github/stars/vikassharma545/Historical-Market-data-From-Zerodha?style=social)
 - **Forks**: ![Forks](https://img.shields.io/github/forks/vikassharma545/Historical-Market-data-From-Zerodha?style=social)
-- **Clone Count** (manually track with GitHub Insights or shield.io custom badges)
 
 ---
 
