@@ -42,10 +42,10 @@ from pyzdata import PyZData, Interval
 client = PyZData(user_id="your_id", password="your_password", totp=123456)
 
 # Fetch instrument token for NIFTY
-token = client.get_instrument_token("NIFTY", "NSE")
+token = client.get_instrument_token("NIFTY 50", "NSE")
 
 # Download 1-minute OHLC + Volume + OI for Jan 2024
-df = client.get_data(token, "2024-01-01", "2024-01-31", interval=Interval.MINUTE_1, oi=True)
+df = client.get_data(token, "2024-01-01", "2024-01-31", interval=Interval.MINUTE_1, oi=True, print_logs=True)
 
 print(df.head())
 ```
