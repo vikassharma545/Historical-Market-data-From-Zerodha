@@ -23,6 +23,20 @@
 
 ---
 
+## 🖥️ PyZData EXE for Non-Programmers
+
+For non-programming users, a simple and clean Windows `.exe` GUI is available for easy data downloading:
+
+### 🔐 Login Screen
+![Login GUI](/assets/login.png)
+
+### 📅 Download Screen
+![Download GUI](/assets/download.png)
+
+> Just open the executable and log in with your Zerodha credentials. Select your symbol, date range, and interval — and click **Download Data**.
+
+---
+
 ## 📦 Installation
 
 Install directly from GitHub:
