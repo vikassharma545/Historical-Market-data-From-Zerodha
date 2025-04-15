@@ -28,11 +28,19 @@ class PyZData:
     INSTRUMENTS_URL = "https://api.kite.trade/instruments"
     HISTORICAL_ENDPOINT = "/instruments/historical/{instrument_token}/{interval}"
 
-    def __init__(self, user_id: str, password: str, totp: int):
+    def __init__(self, user_id=None, password=None, totp=None, enctoken=None):
         
         self.session = requests.Session()
         self._init_retry_strategy()
-        self._login(user_id, password, totp)
+        
+        if enctoken is not None:
+            self.headers = {"Authorization": f"enctoken {enctoken}"}
+            print(f"\n✅ Logged in with enctoken\n")
+        elif user_id and password and totp:
+            self._login(user_id, password, totp)
+        else:
+            raise ValueError("Either enctoken or (user_id, password, totp) must be provided.")
+        
         self.instrument_data = self._load_instrument_data()
         
     def _init_retry_strategy(self):

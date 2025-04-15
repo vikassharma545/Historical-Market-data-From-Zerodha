@@ -52,8 +52,11 @@ pip install git+https://github.com/vikassharma545/Historical-Market-data-From-Ze
 ```python
 from pyzdata import PyZData, Interval
 
-# Login
+# Option 1: Login using credentials
 client = PyZData(user_id="your_id", password="your_password", totp=123456)
+
+# Option 2: Login using enctoken
+# client = PyZData(enctoken="your_enctoken")
 
 # Fetch instrument token for NIFTY
 token = client.get_instrument_token("NIFTY 50", "NSE")
