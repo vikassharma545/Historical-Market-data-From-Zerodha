@@ -7,7 +7,7 @@
 ![GitHub last commit](https://img.shields.io/github/last-commit/vikassharma545/Historical-Market-data-From-Zerodha)
 ![GitHub stars](https://img.shields.io/github/stars/vikassharma545/Historical-Market-data-From-Zerodha?style=social)
 
-Download historical OHLCV and Open Interest candle data for any stock, index, or F&O instrument from **Zerodha** — as a Python library, a CLI command, or a browser-based web app.
+Download historical OHLCV and Open Interest candle data for any stock, index, or F&O instrument from **Zerodha** — as a Python library, a CLI command, or a browser-based web app. No API subscription required.
 
 ---
 

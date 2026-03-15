@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyzdata"
-version = "1.0.0"
-description = "Historical OHLCV market data downloader for Zerodha (Kite API)"
+version = "1.0.1"
+description = "Indian Historical Market Data Downloader from Zerodha"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
