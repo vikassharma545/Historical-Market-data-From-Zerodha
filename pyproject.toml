@@ -4,23 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyzdata"
-version = "1.0.5"
+version = "1.0.4"
 description = "Indian Historical Market Data Downloader from Zerodha"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
     { name = "Vikas Sharma", email = "Jnv2252@Gmail.com" }
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 keywords = ["zerodha", "kite", "market-data", "ohlcv", "trading", "finance", "india"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Financial and Insurance Industry",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -70,7 +67,7 @@ addopts     = "-v --tb=short"
 # ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]

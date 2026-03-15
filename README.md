@@ -1,6 +1,6 @@
 # PyZData – Indian Historical Market Data Downloader
 
-![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![PyPI](https://img.shields.io/pypi/v/pyzdata)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![GitHub repo size](https://img.shields.io/github/repo-size/vikassharma545/Historical-Market-data-From-Zerodha)
