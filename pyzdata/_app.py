@@ -753,10 +753,11 @@ def _init_state() -> None:
 
 _CSS = """
 <style>
-/* ── hide Streamlit footer and main menu; keep header so users can
-   access the built-in theme toggle (Settings → Theme) ── */
-#MainMenu  { visibility: hidden; }
+/* ── hide Streamlit footer ── */
 footer     { visibility: hidden; }
+
+/* ── hide Deploy button ── */
+.stAppDeployButton { visibility: hidden; }
 
 /* ── metric cards — rgba so they work in both light and dark mode ── */
 [data-testid="metric-container"] {

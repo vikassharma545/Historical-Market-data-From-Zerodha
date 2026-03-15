@@ -1,0 +1,10 @@
+[theme]
+base="light"
+
+[runner]
+magicEnabled=false
+fastReruns=false
+
+[client]
+showSidebarNavigation=false
+toolbarMode="viewer"
