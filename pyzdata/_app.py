@@ -752,15 +752,15 @@ def _init_state() -> None:
 
 _CSS = """
 <style>
-/* ── hide default Streamlit chrome ── */
+/* ── hide Streamlit footer and main menu; keep header so users can
+   access the built-in theme toggle (Settings → Theme) ── */
 #MainMenu  { visibility: hidden; }
 footer     { visibility: hidden; }
-header     { visibility: hidden; }
 
-/* ── metric cards ── */
+/* ── metric cards — rgba so they work in both light and dark mode ── */
 [data-testid="metric-container"] {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    background: rgba(100, 116, 139, 0.08);
+    border: 1px solid rgba(100, 116, 139, 0.25);
     border-radius: 12px;
     padding: 16px 12px;
 }
@@ -786,9 +786,9 @@ div[data-testid="column"] .stButton > button {
     padding: 6px 14px;
 }
 
-/* ── info banner ── */
+/* ── info banner — rgba background so text stays readable in dark mode ── */
 .info-card {
-    background: #eff6ff;
+    background: rgba(37, 99, 235, 0.10);
     border-left: 4px solid #2563eb;
     border-radius: 8px;
     padding: 14px 18px;
