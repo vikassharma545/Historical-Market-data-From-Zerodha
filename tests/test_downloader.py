@@ -17,7 +17,6 @@ from pyzdata.downloader import (
 from pyzdata.exceptions import DataFetchError
 from pyzdata.models import Interval
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

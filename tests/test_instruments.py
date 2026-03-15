@@ -11,7 +11,6 @@ from pyzdata.config import Config
 from pyzdata.exceptions import InstrumentNotFoundError
 from pyzdata.instruments import InstrumentManager
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

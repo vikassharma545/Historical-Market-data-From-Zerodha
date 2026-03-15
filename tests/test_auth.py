@@ -8,7 +8,6 @@ import requests
 from pyzdata.auth import KiteAuth
 from pyzdata.exceptions import AuthenticationError
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

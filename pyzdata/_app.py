@@ -7,7 +7,7 @@ Run with:
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -450,7 +450,6 @@ def _execute_download(
             return
 
     # Fetch data
-    months = max(1, (end_date.year - start_date.year)*12 + (end_date.month - start_date.month) + 1)
     with st.spinner(
         f"Downloading data for **{symbol}** … this may take a few seconds for long date ranges."
     ):
@@ -541,8 +540,9 @@ def _render_results(df: pd.DataFrame, meta: dict) -> None:
 
     # Excel
     try:
-        import openpyxl  # noqa: F401 — only attempt if available
         import io as _io
+
+        import openpyxl  # noqa: F401 — only attempt if available
         buf = _io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name=symbol[:31])

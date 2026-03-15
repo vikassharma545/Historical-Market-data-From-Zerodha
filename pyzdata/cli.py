@@ -27,7 +27,7 @@ import argparse
 import logging
 import sys
 
-from . import Config, Interval, PyZData
+from . import Interval, PyZData
 from .exceptions import PyZDataError
 
 

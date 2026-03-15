@@ -1,6 +1,5 @@
 """Unit tests for the CLI argument parser and main() error paths."""
 
-import sys
 from unittest.mock import patch
 
 import pytest
