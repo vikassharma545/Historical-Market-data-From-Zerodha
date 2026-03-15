@@ -1,6 +1,7 @@
-# PyZData – Zerodha Historical Market Data Downloader
+# PyZData – Indian Historical Market Data Downloader
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![PyPI](https://img.shields.io/pypi/v/pyzdata)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![GitHub repo size](https://img.shields.io/github/repo-size/vikassharma545/Historical-Market-data-From-Zerodha)
 ![GitHub last commit](https://img.shields.io/github/last-commit/vikassharma545/Historical-Market-data-From-Zerodha)
@@ -28,7 +29,7 @@ The easiest way to use PyZData is the built-in Streamlit web app.
 **Run it:**
 
 ```bash
-pip install "git+https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git#egg=pyzdata[web]"
+pip install "pyzdata[web]"
 pyzdata-web
 ```
 
@@ -47,10 +48,10 @@ Then open `http://localhost:8501` in your browser.
 
 ```bash
 # Library only (Python API + CLI)
-pip install git+https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git
+pip install pyzdata
 
 # Library + web interface (adds streamlit and openpyxl)
-pip install "git+https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git#egg=pyzdata[web]"
+pip install "pyzdata[web]"
 ```
 
 **Requirements:** Python 3.8+, pandas ≥ 1.3, requests ≥ 2.25
