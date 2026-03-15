@@ -498,8 +498,19 @@ def freq_label_for(interval: Interval) -> str:
 
 def _render_results(df: pd.DataFrame, meta: dict) -> None:
     symbol = meta.get("symbol", "Data")
+    total_rows = len(df)
 
-    st.success(f"✅  Successfully downloaded **{len(df):,} rows** of data for **{symbol}**!")
+    # Hard limit for UI rendering to prevent browser hang
+    MAX_UI_ROWS = 2_000
+    ui_df = df if total_rows <= MAX_UI_ROWS else df.tail(MAX_UI_ROWS)
+
+    st.success(f"✅  Successfully downloaded **{total_rows:,} rows** of data for **{symbol}**!")
+    
+    if total_rows > MAX_UI_ROWS:
+        st.warning(
+            f"⚠️ **Sample Data View:** Showing the most recent {MAX_UI_ROWS:,} rows in the browser "
+            "to prevent freezing. **Click download below to get all data.**"
+        )
 
     # ── Stats row ──────────────────────────────────────────────────────────
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -512,12 +523,12 @@ def _render_results(df: pd.DataFrame, meta: dict) -> None:
 
     # ── Price chart ────────────────────────────────────────────────────────
     st.markdown("#### Price Chart (Close)")
-    chart_df = df.set_index("datetime")[["close"]].rename(columns={"close": "Close Price"})
+    chart_df = ui_df.set_index("datetime")[["close"]].rename(columns={"close": "Close Price"})
     st.line_chart(chart_df, use_container_width=True)
 
     # ── Data table ─────────────────────────────────────────────────────────
-    with st.expander(f"📋  Show data table ({len(df):,} rows)", expanded=False):
-        st.dataframe(df, use_container_width=True, height=400)
+    with st.expander(f"📋  Show data table ({len(ui_df):,} rows)", expanded=False):
+        st.dataframe(ui_df, use_container_width=True, height=400)
 
     # ── Download buttons ───────────────────────────────────────────────────
     st.markdown("#### 💾  Save your data")
