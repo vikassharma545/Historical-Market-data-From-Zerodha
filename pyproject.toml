@@ -34,6 +34,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Web interface: pip install "pyzdata[web]"
+web = [
+    "streamlit>=1.20.0",
+    "openpyxl>=3.0.0",
+]
+# Development / testing: pip install "pyzdata[dev]"
 dev = [
     "pytest>=7.0",
     "pytest-mock>=3.10",
@@ -45,7 +51,8 @@ Repository = "https://github.com/vikassharma545/Historical-Market-data-From-Zero
 Issues     = "https://github.com/vikassharma545/Historical-Market-data-From-Zerodha/issues"
 
 [project.scripts]
-pyzdata = "pyzdata.cli:main"
+pyzdata     = "pyzdata.cli:main"
+pyzdata-web = "pyzdata.run_web:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -28,8 +28,8 @@ The easiest way to use PyZData is the built-in Streamlit web app.
 **Run it:**
 
 ```bash
-pip install git+https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git
-streamlit run app.py
+pip install "git+https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git#egg=pyzdata[web]"
+pyzdata-web
 ```
 
 Then open `http://localhost:8501` in your browser.
@@ -46,8 +46,11 @@ Then open `http://localhost:8501` in your browser.
 ## Installation
 
 ```bash
-# Install from GitHub
+# Library only (Python API + CLI)
 pip install git+https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git
+
+# Library + web interface (adds streamlit and openpyxl)
+pip install "git+https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git#egg=pyzdata[web]"
 ```
 
 **Requirements:** Python 3.8+, pandas ≥ 1.3, requests ≥ 2.25
@@ -57,7 +60,7 @@ For development:
 ```bash
 git clone https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git
 cd Historical-Market-data-From-Zerodha
-pip install -e ".[dev]"
+pip install -e ".[web,dev]"
 ```
 
 ---
