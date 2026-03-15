@@ -4,12 +4,13 @@ on:
   release:
     types: [published]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   pypi-publish:
     name: Build and publish Python package
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     # Required for PyPI Trusted Publishing
     permissions:
