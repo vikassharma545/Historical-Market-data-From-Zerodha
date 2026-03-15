@@ -1,178 +1,153 @@
 # PyZData – Zerodha Historical Market Data Downloader
 
+![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 ![GitHub repo size](https://img.shields.io/github/repo-size/vikassharma545/Historical-Market-data-From-Zerodha)
 ![GitHub last commit](https://img.shields.io/github/last-commit/vikassharma545/Historical-Market-data-From-Zerodha)
-![GitHub issues](https://img.shields.io/github/issues/vikassharma545/Historical-Market-data-From-Zerodha)
 ![GitHub stars](https://img.shields.io/github/stars/vikassharma545/Historical-Market-data-From-Zerodha?style=social)
 
-A production-grade Python library for downloading historical OHLCV and Open Interest candle data from [Zerodha](https://zerodha.com) using the Kite Connect API.
+Download historical OHLCV and Open Interest candle data for any stock, index, or F&O instrument from **Zerodha** — as a Python library, a CLI command, or a browser-based web app.
 
 ---
 
-## Features
+## What you can do with PyZData
 
-- Download 1-minute to daily OHLCV candles for any instrument
-- Supports Open Interest (OI) for F&O instruments
-- Two authentication modes: credential login (2FA/TOTP) or pre-obtained enctoken
-- Parallel month-by-month downloads via a thread pool
-- Instruments CSV cached on disk — no 50 MB re-download on every run
-- Configurable retry strategy with exponential backoff
-- Full CLI (`pyzdata` command) with CSV export
-- Structured logging (no `print` statements — integrates with any logging setup)
-- Typed exceptions for fine-grained error handling
+- Download price history for **any stock or index** listed on Zerodha (NSE, BSE, NFO, MCX)
+- Choose intervals from **1-minute to daily**
+- Export clean **pandas DataFrames** ready for backtesting, charting, or ML
+- Use the **web app** — no coding needed
+- Use the **CLI** — one-liner downloads from the terminal
+- Use the **Python library** — import and integrate into your own scripts
 
 ---
 
-## Architecture
+## Web Interface (no coding required)
 
-```
-pyzdata/
-├── client.py        PyZData — public facade; wires the components together
-├── auth.py          KiteAuth — two-step credential login
-├── instruments.py   InstrumentManager — token lookup + disk cache
-├── downloader.py    DataDownloader — parallel monthly fetches
-├── models.py        Interval enum
-├── config.py        Config dataclass + PYZDATA_* env-var loading
-├── exceptions.py    Typed exception hierarchy
-└── cli.py           `pyzdata` CLI entry point
+The easiest way to use PyZData is the built-in Streamlit web app.
+
+**Run it:**
+
+```bash
+pip install git+https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git
+streamlit run app.py
 ```
 
-Data flow:
+Then open `http://localhost:8501` in your browser.
 
-```
-PyZData.__init__
-  ├─ KiteAuth.login_with_credentials()  →  enctoken
-  └─ InstrumentManager.load()           →  cached CSV
-
-PyZData.get_data()
-  └─ DataDownloader.fetch()
-       ├─ split range into monthly windows
-       ├─ ThreadPoolExecutor (parallel HTTP)
-       │    └─ GET /instruments/historical/{token}/{interval}
-       └─ concat → deduplicate → sort → return DataFrame
-```
+**Features:**
+- Click popular stocks (NIFTY 50, RELIANCE, TCS, HDFC Bank …) — no typing needed
+- Quick date presets: Last Week, Last Month, Last Year, Last 3 Years …
+- Plain-English frequency selector with descriptions
+- Download result as **CSV** or **Excel (.xlsx)**
+- Built-in Help tab with step-by-step guides
 
 ---
 
 ## Installation
 
 ```bash
-# From GitHub
+# Install from GitHub
 pip install git+https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git
+```
 
-# For development (includes test dependencies)
+**Requirements:** Python 3.8+, pandas ≥ 1.3, requests ≥ 2.25
+
+For development:
+
+```bash
 git clone https://github.com/vikassharma545/Historical-Market-data-From-Zerodha.git
 cd Historical-Market-data-From-Zerodha
 pip install -e ".[dev]"
 ```
 
-**Requirements:** Python >= 3.8, pandas >= 1.3, requests >= 2.25
-
 ---
 
-## Quick Start
-
-### Python API
+## Python Library
 
 ```python
 from pyzdata import PyZData, Interval
 
-# --- Authentication ---
-
-# Option A: pre-obtained enctoken (fastest — no login round-trip)
+# Login with enctoken (paste from browser cookies after logging into kite.zerodha.com)
 client = PyZData(enctoken="your_enctoken_here")
 
-# Option B: credential login (handles 2FA automatically)
+# OR login with credentials
 client = PyZData(user_id="AB1234", password="your_password", totp="123456")
-# Note: totp accepts both str and int — leading zeros are safe.
 
-# --- Discover instruments ---
-
-# Exact lookup
+# Find the instrument token for a symbol
 token = client.get_instrument_token("NIFTY 50", "NSE")
 
-# Partial search (useful when you don't know the exact symbol)
+# Not sure of the exact symbol name? Search for it
 results = client.search_instruments("NIFTY", exchange="NSE")
 print(results[["tradingsymbol", "instrument_token", "exchange"]])
 
-# --- Download data ---
-
-# Daily candles for a full year
+# Download daily candles for a full year
 df = client.get_data(token, "2024-01-01", "2024-12-31", Interval.DAY)
 print(df.head())
-#   tradingsymbol            datetime     open     high      low    close     volume
-# 0      NIFTY 50 2024-01-02 09:15:00  21741.9  21774.2  21658.4  21737.9   142850
-# ...
 
-# 1-minute candles with Open Interest (F&O instruments)
+# Download 1-minute candles with Open Interest (F&O instruments)
 fut_token = client.get_instrument_token("NIFTY24JANFUT", "NFO")
-df_oi = client.get_data(fut_token, "2024-01-02", "2024-01-25", Interval.MINUTE_1, oi=True)
-# Columns: tradingsymbol, datetime, open, high, low, close, volume, open_interest
+df = client.get_data(fut_token, "2024-01-02", "2024-01-25", Interval.MINUTE_1, oi=True)
 ```
 
-### CLI
+**Output columns:** `tradingsymbol, datetime, open, high, low, close, volume` (+ `open_interest` when `oi=True`)
+
+---
+
+## CLI
 
 ```bash
-# Daily data, print to console
+# Daily data for NIFTY 50 — print to terminal
 pyzdata --enctoken TOKEN "NIFTY 50" NSE 2024-01-01 2024-12-31
 
-# 1-minute data, save to CSV
+# 1-minute data — save to CSV
 pyzdata --enctoken TOKEN RELIANCE NSE 2024-01-01 2024-06-30 \
-        --interval minute --output reliance_1min.csv
+        --interval minute --output reliance.csv
 
-# Credential login
+# Login with credentials
 pyzdata --user-id AB1234 --password pw --totp 123456 \
         RELIANCE NSE 2024-01-01 2024-01-31
 
-# Search for instruments
-pyzdata --enctoken TOKEN search NIFTY --exchange NSE
+# Search for a symbol
+pyzdata --enctoken TOKEN search HDFC --exchange NSE
 
-# Show all options
+# All options
 pyzdata --help
 ```
 
 ---
 
+## Available Intervals
+
+| Enum | Interval | Best for |
+|------|----------|----------|
+| `Interval.MINUTE_1` | 1 minute | Intraday scalping analysis |
+| `Interval.MINUTE_5` | 5 minutes | Intraday charts |
+| `Interval.MINUTE_15` | 15 minutes | Intraday / short-term |
+| `Interval.MINUTE_30` | 30 minutes | Swing trading |
+| `Interval.HOUR_1` | 1 hour | Swing / positional |
+| `Interval.DAY` | Daily | Long-term investing & backtesting |
+
+---
+
 ## Configuration
 
-All settings can be overridden via environment variables.  Copy `.env.example`
-to `.env` and fill in your values (use [python-dotenv](https://pypi.org/project/python-dotenv/)
-to load them automatically).
+Copy `.env.example` to `.env` and set any values you want to override:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PYZDATA_MAX_WORKERS` | `4` | Parallel download threads |
-| `PYZDATA_MAX_RETRIES` | `5` | Retry attempts on transient failures |
-| `PYZDATA_BACKOFF_FACTOR` | `1.0` | Exponential backoff base (seconds) |
-| `PYZDATA_TIMEOUT` | `30` | HTTP request timeout (seconds) |
-| `PYZDATA_CACHE_TTL_HOURS` | `24` | Instruments cache lifetime |
-| `PYZDATA_CACHE_PATH` | `~/.pyzdata/instruments.csv` | Cache file location |
-| `PYZDATA_LOG_LEVEL` | `WARNING` | Log level: DEBUG, INFO, WARNING, ERROR |
+| `PYZDATA_MAX_RETRIES` | `5` | Retry attempts on failures |
+| `PYZDATA_TIMEOUT` | `30` | HTTP timeout in seconds |
+| `PYZDATA_CACHE_TTL_HOURS` | `24` | How long to cache the instruments list |
+| `PYZDATA_LOG_LEVEL` | `WARNING` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
-Or pass a `Config` object directly:
+Or pass a `Config` object in code:
 
 ```python
 from pyzdata import Config, PyZData
 
-cfg = Config(max_workers=8, log_level="DEBUG", instruments_cache_ttl_hours=12)
+cfg = Config(max_workers=8, log_level="DEBUG")
 client = PyZData(enctoken="...", config=cfg)
-```
-
----
-
-## Logging
-
-PyZData uses Python's standard `logging` module under the `pyzdata` namespace.
-No `print` statements — output is fully controlled by the host application:
-
-```python
-import logging
-
-# Show all internal messages
-logging.basicConfig(level=logging.DEBUG)
-
-# Or configure just the pyzdata logger
-logging.getLogger("pyzdata").setLevel(logging.INFO)
 ```
 
 ---
@@ -180,54 +155,43 @@ logging.getLogger("pyzdata").setLevel(logging.INFO)
 ## Error Handling
 
 ```python
-from pyzdata import PyZData, Interval
 from pyzdata.exceptions import (
-    AuthenticationError,
-    InstrumentNotFoundError,
-    DataFetchError,
-    PyZDataError,   # catch-all base class
+    AuthenticationError,    # wrong credentials or expired enctoken
+    InstrumentNotFoundError, # symbol not found
+    DataFetchError,          # API or network failure
+    PyZDataError,            # catch-all base class
 )
 
 try:
     client = PyZData(enctoken="...")
-    token  = client.get_instrument_token("INVALID_SYM", "NSE")
+    token  = client.get_instrument_token("RELIANCE", "NSE")
+    df     = client.get_data(token, "2024-01-01", "2024-12-31", Interval.DAY)
 except AuthenticationError as e:
     print(f"Login failed: {e}")
 except InstrumentNotFoundError as e:
     print(f"Symbol not found: {e}")
 except DataFetchError as e:
-    print(f"Data fetch failed: {e}")
-except PyZDataError as e:
-    print(f"PyZData error: {e}")
+    print(f"Download failed: {e}")
 ```
 
 ---
 
-## Available Intervals
+## Project Structure
 
-| Enum | API value | Description |
-|------|-----------|-------------|
-| `Interval.MINUTE_1` | `minute` | 1-minute candles |
-| `Interval.MINUTE_3` | `3minute` | 3-minute candles |
-| `Interval.MINUTE_5` | `5minute` | 5-minute candles |
-| `Interval.MINUTE_10` | `10minute` | 10-minute candles |
-| `Interval.MINUTE_15` | `15minute` | 15-minute candles |
-| `Interval.MINUTE_30` | `30minute` | 30-minute candles |
-| `Interval.HOUR_1` | `60minute` | 1-hour candles |
-| `Interval.DAY` | `day` | Daily candles |
+```
+pyzdata/
+├── client.py        PyZData — main entry point
+├── auth.py          Two-step Zerodha login
+├── instruments.py   Symbol lookup with 24-hour disk cache
+├── downloader.py    Parallel monthly data fetching
+├── models.py        Interval enum
+├── config.py        Settings + environment variable loading
+├── exceptions.py    Typed exception hierarchy
+└── cli.py           pyzdata command-line tool
 
----
-
-## GUI for Non-Programmers
-
-A standalone Windows `.exe` with a graphical interface is available in the repo.
-No Python installation required.
-
-### Login Screen
-![Login GUI](/assets/login.png)
-
-### Download Screen
-![Download GUI](/assets/download.png)
+app.py               Streamlit web interface
+tests/               48 unit tests (no credentials needed)
+```
 
 ---
 
@@ -238,27 +202,25 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Tests use mocked HTTP sessions — no real Zerodha credentials or network access
-are required.
+No Zerodha account or internet connection needed — all HTTP calls are mocked.
 
 ---
 
-## Migrating from v0.1
+## How to get your enctoken
 
-| v0.1 | v1.0 |
-|------|------|
-| `get_data(..., print_logs=True)` | Use `logging.basicConfig(level=logging.INFO)` |
-| `from pyzdata.pyzdata import PyZData` | `from pyzdata import PyZData` |
-| `totp=123456` (int) | `totp="123456"` or `totp=123456` — both work |
-| No CLI | `pyzdata --help` |
-| No typed exceptions | `except DataFetchError` etc. |
+1. Log in to [kite.zerodha.com](https://kite.zerodha.com)
+2. Press **F12** → **Application** tab → **Cookies** → `kite.zerodha.com`
+3. Copy the value of the `enctoken` cookie
+4. Paste it into the app or pass it as `PyZData(enctoken="...")`
+
+The enctoken refreshes each time you log in to Kite.
 
 ---
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE)
 
 ## Author
 
-Developed by [Vikas Sharma](https://github.com/vikassharma545)
+Built by [Vikas Sharma](https://github.com/vikassharma545)
