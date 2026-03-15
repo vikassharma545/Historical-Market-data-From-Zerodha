@@ -11,79 +11,13 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
-from pyzdata import Config, Interval, PyZData
+from pyzdata import Config, Interval, PyZData, __version__
 from pyzdata.exceptions import (
     AuthenticationError,
     DataFetchError,
     InstrumentNotFoundError,
     PyZDataError,
 )
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Page config  (must be first Streamlit call)
-# ─────────────────────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="PyZData – Stock Data Downloader",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Global CSS  – clean cards, rounded buttons, readable fonts
-# ─────────────────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-/* ── hide default Streamlit chrome ── */
-#MainMenu  { visibility: hidden; }
-footer     { visibility: hidden; }
-header     { visibility: hidden; }
-
-/* ── metric cards ── */
-[data-testid="metric-container"] {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 16px 12px;
-}
-
-/* ── rounded primary button ── */
-.stButton > button[kind="primary"] {
-    border-radius: 10px;
-    font-size: 17px;
-    font-weight: 600;
-    padding: 12px 28px;
-    background: #2563eb;
-    border-color: #2563eb;
-}
-.stButton > button[kind="primary"]:hover {
-    background: #1d4ed8;
-    border-color: #1d4ed8;
-}
-
-/* ── stock chip buttons ── */
-div[data-testid="column"] .stButton > button {
-    border-radius: 20px;
-    font-size: 13px;
-    padding: 6px 14px;
-}
-
-/* ── info banner ── */
-.info-card {
-    background: #eff6ff;
-    border-left: 4px solid #2563eb;
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin-bottom: 10px;
-}
-.step-header {
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 4px;
-    margin-top: 24px;
-}
-</style>
-""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data tables  (no external API calls needed)
@@ -107,6 +41,7 @@ POPULAR_STOCKS: list[tuple[str, str, str, str]] = [
     ("AXISBANK",    "NSE", "Axis Bank",       "💰"),
     ("MARUTI",      "NSE", "Maruti Suzuki",   "🚙"),
     ("ONGC",        "NSE", "ONGC",            "🛢️"),
+    ("SENSEX",      "BSE", "SENSEX",          "📊"),
 ]
 
 # Human-readable label → (Interval, description)
@@ -182,12 +117,8 @@ def _set_dates(days: int) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_sidebar() -> None:
-    st.sidebar.image(
-        "https://zerodha.com/static/images/logo.svg",
-        width=130,
-    )
-    st.sidebar.title("PyZData")
-    st.sidebar.caption("Free • Open source • No signup needed")
+    st.sidebar.markdown("# 📊 PyZData")
+    st.sidebar.caption(f"v{__version__} • Free • Open source • No signup needed")
     st.sidebar.divider()
 
     if is_logged_in():
@@ -366,22 +297,17 @@ def render_download_tab() -> None:
     with sym_col:
         symbol = st.text_input(
             "Type a stock or index name",
-            value=_ss("sym", ""),
+            key="sym",
             placeholder="e.g.  NIFTY 50,  RELIANCE,  HDFCBANK,  TCS …",
             label_visibility="collapsed",
             help="Enter the exact trading symbol. If unsure, use the 🔍 Search tab.",
         )
-        if symbol != _ss("sym", ""):
-            st.session_state["sym"] = symbol
 
     with exch_col:
-        # Default to NSE; pre-select based on session state
-        default_exch = _ss("exch", "NSE")
-        exch_idx     = EXCHANGES.index(default_exch) if default_exch in EXCHANGES else 0
         exchange = st.selectbox(
             "Exchange",
             EXCHANGES,
-            index=exch_idx,
+            key="exch",
             label_visibility="collapsed",
             help="NSE = National Stock Exchange (most stocks). NFO = Futures & Options.",
         )
@@ -414,13 +340,13 @@ def render_download_tab() -> None:
     with d1:
         start_date = st.date_input(
             "From date",
-            value=_ss("start_date", date.today() - timedelta(days=365)),
+            key="start_date",
             max_value=date.today(),
         )
     with d2:
         end_date = st.date_input(
             "To date",
-            value=_ss("end_date", date.today()),
+            key="end_date",
             max_value=date.today(),
         )
 
@@ -460,7 +386,7 @@ def render_download_tab() -> None:
     st.divider()
 
     # ── Download button ───────────────────────────────────────────────────
-    current_sym = symbol.strip() or _ss("sym", "")
+    current_sym = symbol.strip()
 
     if not current_sym:
         st.info("👆  Pick a stock above, then click Download.")
@@ -792,10 +718,92 @@ Symbols are **case-sensitive** and must match exactly. Common issues:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# State initialisation
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _init_state() -> None:
+    """Set default session-state values on the very first run."""
+    defaults: dict = {
+        "sym":        "",
+        "exch":       "NSE",
+        "start_date": date.today() - timedelta(days=365),
+        "end_date":   date.today(),
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
+_CSS = """
+<style>
+/* ── hide default Streamlit chrome ── */
+#MainMenu  { visibility: hidden; }
+footer     { visibility: hidden; }
+header     { visibility: hidden; }
+
+/* ── metric cards ── */
+[data-testid="metric-container"] {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 16px 12px;
+}
+
+/* ── rounded primary button ── */
+.stButton > button[kind="primary"] {
+    border-radius: 10px;
+    font-size: 17px;
+    font-weight: 600;
+    padding: 12px 28px;
+    background: #2563eb;
+    border-color: #2563eb;
+}
+.stButton > button[kind="primary"]:hover {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+}
+
+/* ── stock chip buttons ── */
+div[data-testid="column"] .stButton > button {
+    border-radius: 20px;
+    font-size: 13px;
+    padding: 6px 14px;
+}
+
+/* ── info banner ── */
+.info-card {
+    background: #eff6ff;
+    border-left: 4px solid #2563eb;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+}
+.step-header {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    margin-top: 24px;
+}
+</style>
+"""
+
+
 def main() -> None:
+    # These two calls MUST stay inside main() so they run on every Streamlit
+    # rerun (not just once when the module is first imported).
+    st.set_page_config(
+        page_title="PyZData – Stock Data Downloader",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    st.markdown(_CSS, unsafe_allow_html=True)
+
+    _init_state()
     render_sidebar()
 
     st.markdown("## 📊 PyZData — Indian Stock Market Data Downloader")

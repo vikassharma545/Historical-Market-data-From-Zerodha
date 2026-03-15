@@ -123,6 +123,15 @@ class KiteAuth:
                 f"Network error during 2FA: {exc}"
             ) from exc
 
+        try:
+            payload = resp.json()
+        except Exception:
+            payload = {}
+        if payload.get("status") != "success":
+            raise AuthenticationError(
+                f"2FA rejected by Kite: {payload.get('message', 'Invalid TOTP or session expired')}"
+            )
+
         enctoken = resp.cookies.get("enctoken")
         if not enctoken:
             raise AuthenticationError(
