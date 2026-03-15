@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Generator, List, Optional, Tuple
+from typing import Callable, Dict, Generator, List, Optional, Tuple
 
 import pandas as pd
 import requests
@@ -77,6 +77,7 @@ class DataDownloader:
         end_date: str,
         interval: Interval,
         oi: bool = False,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> pd.DataFrame:
         """Download candles for *instrument_token* over [start_date, end_date].
 
@@ -125,7 +126,7 @@ class DataDownloader:
             symbol, from_dt.date(), to_dt.date(), interval.value, len(windows),
         )
 
-        frames = self._fetch_all(instrument_token, windows, interval, oi, symbol)
+        frames = self._fetch_all(instrument_token, windows, interval, oi, symbol, progress_callback)
 
         if not frames:
             logger.warning("No data returned for %s %s→%s", symbol, from_dt.date(), to_dt.date())
@@ -146,16 +147,22 @@ class DataDownloader:
         interval: Interval,
         oi: bool,
         symbol: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> List[pd.DataFrame]:
         """Fetch all windows, in parallel when there are multiple."""
         if len(windows) == 1:
             # Single window — let errors propagate to the caller.
             df = self._fetch_window(token, *windows[0], interval, oi, symbol)
+            if progress_callback:
+                progress_callback(1, 1)
             return [df] if not df.empty else []
 
         # Pre-allocate result slots to preserve chronological order after
         # out-of-order parallel completion.
         results: List[Optional[pd.DataFrame]] = [None] * len(windows)
+        total_windows = len(windows)
+        completed = 0
+        
         with ThreadPoolExecutor(max_workers=self._config.max_workers) as pool:
             future_to_idx = {
                 pool.submit(self._fetch_window, token, s, e, interval, oi, symbol): i
@@ -168,6 +175,10 @@ class DataDownloader:
                 except DataFetchError as exc:
                     logger.error("Window %d failed: %s", idx, exc)
                     results[idx] = pd.DataFrame()
+                
+                completed += 1
+                if progress_callback:
+                    progress_callback(completed, total_windows)
 
         return [r for r in results if r is not None and not r.empty]
 

@@ -19,7 +19,7 @@ dependencies and delegates to them.
 from __future__ import annotations
 
 import logging
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import pandas as pd
 import requests
@@ -176,6 +176,7 @@ class PyZData:
         end_date: str,
         interval: Interval,
         oi: bool = False,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> pd.DataFrame:
         """Download historical candle data for one instrument.
 
@@ -220,7 +221,7 @@ class PyZData:
             print(df.head())
         """
         return self._downloader.fetch(
-            instrument_token, start_date, end_date, interval, oi
+            instrument_token, start_date, end_date, interval, oi, progress_callback
         )
 
 

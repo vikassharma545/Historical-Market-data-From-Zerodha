@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from typing import Dict, List, Tuple
-
+import io
 import pandas as pd
 import streamlit as st
 
@@ -123,13 +123,13 @@ def _set_dates(days: int) -> None:
 
 def render_sidebar() -> None:
     st.sidebar.markdown("# 📊 PyZData")
-    st.sidebar.caption(f"v{__version__} • Free • Open source • No signup needed")
+    st.sidebar.caption(f"v{__version__} • Free • Open source • No Subscription needed")
     st.sidebar.divider()
 
     if is_logged_in():
         st.sidebar.success("You are logged in ✅")
-        if st.sidebar.button("🚪  Log out", use_container_width=True):
-            for k in ["client", "last_df", "last_meta", "sym", "exch"]:
+        if st.sidebar.button("🚪  Log out", width="stretch"):
+            for k in ["client", "last_csv", "last_meta", "sym", "exch"]:
                 st.session_state.pop(k, None)
             st.rerun()
         st.sidebar.divider()
@@ -186,7 +186,7 @@ def _sidebar_enctoken_form() -> None:
         type="password",
         placeholder="Paste the long token here …",
     )
-    if st.sidebar.button("Login →", type="primary", use_container_width=True):
+    if st.sidebar.button("Login →", type="primary", width="stretch"):
         if not enctoken.strip():
             st.sidebar.error("Please paste your enctoken first.")
             return
@@ -202,7 +202,7 @@ def _sidebar_credential_form() -> None:
         max_chars=6,
         help="Open your Google Authenticator / Zerodha Authenticator app for this code.",
     )
-    if st.sidebar.button("Login →", type="primary", use_container_width=True):
+    if st.sidebar.button("Login →", type="primary", width="stretch"):
         missing = [n for n, v in [("User ID", user_id), ("Password", password), ("TOTP", totp)] if not v.strip()]
         if missing:
             st.sidebar.error(f"Please fill in: {', '.join(missing)}")
@@ -332,7 +332,7 @@ def render_download_tab() -> None:
     for row in rows:
         cols = st.columns(len(row))
         for col, (sym, exch, label, emoji) in zip(cols, row):
-            if col.button(f"{emoji}  {label}", key=f"chip_{sym}", use_container_width=True):
+            if col.button(f"{emoji}  {label}", key=f"chip_{sym}", width="stretch"):
                 _set_stock(sym, exch)
                 st.rerun()
 
@@ -344,7 +344,7 @@ def render_download_tab() -> None:
     # Preset quick buttons
     preset_cols = st.columns(len(DATE_PRESETS))
     for col, (label, days) in zip(preset_cols, DATE_PRESETS.items()):
-        if col.button(label, key=f"preset_{days}", use_container_width=True):
+        if col.button(label, key=f"preset_{days}", width="stretch"):
             _set_dates(days)
             st.rerun()
 
@@ -414,12 +414,12 @@ def render_download_tab() -> None:
         f"&nbsp;|&nbsp; ~{months} month(s)"
     )
 
-    if st.button("🚀  Download Data", type="primary", use_container_width=True):
-        _execute_download(client, current_sym, exchange, start_date, end_date, interval, oi, freq_label)
+    if st.button("🚀  Download Data", type="primary", width="stretch"):
+        _execute_download(client, current_sym, exchange, start_date, end_date, interval, oi)
 
     # ── Show last result ──────────────────────────────────────────────────
-    if _ss("last_df") is not None:
-        _render_results(_ss("last_df"), _ss("last_meta", {}))
+    if _ss("last_csv") is not None:
+        _render_results()
 
 
 def _execute_download(
@@ -430,7 +430,6 @@ def _execute_download(
     end_date:   date,
     interval:   Interval,
     oi:         bool,
-    freq_label: str = "",
 ) -> None:
     # Resolve token
     with st.spinner(f"Looking up {symbol} on {exchange} …"):
@@ -449,24 +448,34 @@ def _execute_download(
             st.error(f"Error: {exc}")
             return
 
-    # Fetch data
-    with st.spinner(
-        f"Downloading data for **{symbol}** … this may take a few seconds for long date ranges."
-    ):
-        try:
-            df = client.get_data(token, str(start_date), str(end_date), interval, oi=oi)
-        except DataFetchError as exc:
-            st.error(
-                f"Download failed: {exc}\n\n"
-                "This can happen when:\n"
-                "- Your session has expired — try logging out and back in\n"
-                "- Zerodha's servers are temporarily busy — wait a moment and retry\n"
-                "- The date range is too large for the selected interval"
-            )
-            return
-        except PyZDataError as exc:
-            st.error(f"Unexpected error: {exc}")
-            return
+    # Fetch data with progress bar
+    progress_bar = st.progress(0, text=f"Downloading **{symbol}** …")
+
+    def _on_progress(completed: int, total: int) -> None:
+        pct = completed / total if total else 1
+        progress_bar.progress(pct, text=f"Downloading **{symbol}** … ({completed}/{total} months)")
+
+    try:
+        df = client.get_data(
+            token, str(start_date), str(end_date), interval,
+            oi=oi, progress_callback=_on_progress,
+        )
+    except DataFetchError as exc:
+        progress_bar.empty()
+        st.error(
+            f"Download failed: {exc}\n\n"
+            "This can happen when:\n"
+            "- Your session has expired — try logging out and back in\n"
+            "- Zerodha's servers are temporarily busy — wait a moment and retry\n"
+            "- The date range is too large for the selected interval"
+        )
+        return
+    except PyZDataError as exc:
+        progress_bar.empty()
+        st.error(f"Unexpected error: {exc}")
+        return
+
+    progress_bar.progress(1.0, text="Download complete!")
 
     if df.empty:
         st.warning(
@@ -477,100 +486,52 @@ def _execute_download(
         )
         return
 
-    st.session_state["last_df"]   = df
+    # Convert once here — don't store the raw DataFrame in session state.
+    # Streamlit re-serialises session state on every rerun, and a 460k-row
+    # DataFrame makes that extremely slow.
+    progress_bar.progress(1.0, text="Preparing download …")
+
+    st.session_state["last_csv"] = df.to_csv(index=False).encode("utf-8")
     st.session_state["last_meta"] = {
-        "symbol":    symbol,
-        "exchange":  exchange,
-        "interval":  freq_label or freq_label_for(interval),
-        "start":     start_date,
-        "end":       end_date,
+        "symbol": symbol,
+        "rows":   len(df),
+        "fname":  f"{symbol.replace(' ', '_')}_{df['datetime'].min().date()}_{df['datetime'].max().date()}",
     }
+    progress_bar.empty()
     st.balloons()
     st.rerun()
 
 
-def freq_label_for(interval: Interval) -> str:
-    for label, (iv, _) in FREQUENCY_OPTIONS.items():
-        if iv == interval:
-            return label.split("  ")[1].split("(")[0].strip()
-    return interval.value
-
-
-def _render_results(df: pd.DataFrame, meta: dict) -> None:
+def _render_results() -> None:
+    meta = _ss("last_meta", {})
     symbol = meta.get("symbol", "Data")
-    total_rows = len(df)
-
-    # Hard limit for UI rendering to prevent browser hang
-    MAX_UI_ROWS = 2_000
-    ui_df = df if total_rows <= MAX_UI_ROWS else df.tail(MAX_UI_ROWS)
+    total_rows = meta.get("rows", 0)
+    fname_base = meta.get("fname", symbol)
 
     st.success(f"✅  Successfully downloaded **{total_rows:,} rows** of data for **{symbol}**!")
-    
-    if total_rows > MAX_UI_ROWS:
-        st.warning(
-            f"⚠️ **Sample Data View:** Showing the most recent {MAX_UI_ROWS:,} rows in the browser "
-            "to prevent freezing. **Click download below to get all data.**"
-        )
 
-    # ── Stats row ──────────────────────────────────────────────────────────
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Total Rows",  f"{len(df):,}")
-    c2.metric("From",        str(df["datetime"].min().date()))
-    c3.metric("To",          str(df["datetime"].max().date()))
-    c4.metric("Highest",     f"₹{df['high'].max():,.2f}")
-    c5.metric("Lowest",      f"₹{df['low'].min():,.2f}")
-    c6.metric("Avg Volume",  f"{int(df['volume'].mean()):,}")
-
-    # ── Price chart ────────────────────────────────────────────────────────
-    st.markdown("#### Price Chart (Close)")
-    chart_df = ui_df.set_index("datetime")[["close"]].rename(columns={"close": "Close Price"})
-    st.line_chart(chart_df, use_container_width=True)
-
-    # ── Data table ─────────────────────────────────────────────────────────
-    with st.expander(f"📋  Show data table ({len(ui_df):,} rows)", expanded=False):
-        st.dataframe(ui_df, use_container_width=True, height=400)
+    # ── Sample data table ───────────────────────────────────────────────────
+    with st.expander(f"📋  Show sample data (first 10 of {total_rows:,} rows)"):
+        sample = pd.read_csv(io.BytesIO(_ss("last_csv")), nrows=10)
+        st.dataframe(sample, width="stretch", hide_index=True)
 
     # ── Download buttons ───────────────────────────────────────────────────
     st.markdown("#### 💾  Save your data")
 
-    fname_base = f"{symbol.replace(' ', '_')}_{df['datetime'].min().date()}_{df['datetime'].max().date()}"
+    dl1, dl2 = st.columns([2, 2])
 
-    dl1, dl2, dl3 = st.columns([2, 2, 1])
-
-    # CSV
-    csv_data = df.to_csv(index=False).encode("utf-8")
     dl1.download_button(
         label="📄  Download as CSV",
-        data=csv_data,
+        data=_ss("last_csv"),
         file_name=f"{fname_base}.csv",
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
         type="primary",
         help="Opens in Excel, Google Sheets, or any spreadsheet app.",
     )
 
-    # Excel
-    try:
-        import io as _io
-
-        import openpyxl  # noqa: F401 — only attempt if available
-        buf = _io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name=symbol[:31])
-        buf.seek(0)
-        dl2.download_button(
-            label="📊  Download as Excel (.xlsx)",
-            data=buf.getvalue(),
-            file_name=f"{fname_base}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            help="Native Excel format — preserves formatting.",
-        )
-    except ImportError:
-        dl2.info("Install `openpyxl` for Excel export: `pip install openpyxl`")
-
-    if dl3.button("🗑️  Clear", use_container_width=True):
-        for k in ["last_df", "last_meta"]:
+    if dl2.button("🗑️  Clear", width="stretch"):
+        for k in ["last_meta", "last_csv"]:
             st.session_state.pop(k, None)
         st.rerun()
 
@@ -599,7 +560,7 @@ def render_search_tab() -> None:
     with col2:
         exch = st.selectbox("Exchange", ["All"] + EXCHANGES, label_visibility="collapsed")
     with col3:
-        go = st.button("Search", type="primary", use_container_width=True)
+        go = st.button("Search", type="primary", width="stretch")
 
     if go or query:
         if not query.strip():
@@ -623,7 +584,7 @@ def render_search_tab() -> None:
                  "instrument_token", "expiry", "strike", "lot_size"]
                 if c in results.columns]
 
-            st.dataframe(results[display_cols], use_container_width=True, height=460)
+            st.dataframe(results[display_cols], width="stretch", height=460)
 
             st.caption(
                 "👆  Copy the **tradingsymbol** and **exchange** values from above, "
@@ -769,14 +730,6 @@ footer     { visibility: hidden; }
 
 /* ── hide Deploy button ── */
 .stAppDeployButton { visibility: hidden; }
-
-/* ── metric cards — rgba so they work in both light and dark mode ── */
-[data-testid="metric-container"] {
-    background: rgba(100, 116, 139, 0.08);
-    border: 1px solid rgba(100, 116, 139, 0.25);
-    border-radius: 12px;
-    padding: 16px 12px;
-}
 
 /* ── rounded primary button ── */
 .stButton > button[kind="primary"] {
