@@ -34,4 +34,9 @@ __all__ = [
     "ConfigurationError",
 ]
 
-__version__ = "1.0.0"
+try:
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("pyzdata")
+except Exception:  # package not installed (editable / dev checkout)
+    __version__ = "0.0.0-dev"

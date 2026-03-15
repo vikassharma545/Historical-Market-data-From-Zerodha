@@ -27,7 +27,7 @@ import pandas as pd
 import requests
 
 from .config import Config
-from .exceptions import InstrumentNotFoundError
+from .exceptions import DataFetchError, InstrumentNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ class InstrumentManager:
             )
             resp.raise_for_status()
         except requests.RequestException as exc:
-            raise RuntimeError(
+            raise DataFetchError(
                 f"Failed to download instruments CSV: {exc}"
             ) from exc
         return pd.read_csv(StringIO(resp.text), low_memory=False)

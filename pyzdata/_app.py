@@ -7,6 +7,7 @@ Run with:
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -24,7 +25,7 @@ from pyzdata.exceptions import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 # (symbol, exchange, friendly label, emoji)
-POPULAR_STOCKS: list[tuple[str, str, str, str]] = [
+POPULAR_STOCKS: List[Tuple[str, str, str, str]] = [
     ("NIFTY 50",    "NSE", "NIFTY 50",       "📈"),
     ("NIFTY BANK",  "NSE", "BANK NIFTY",     "🏦"),
     ("RELIANCE",    "NSE", "Reliance",        "⚡"),
@@ -45,7 +46,7 @@ POPULAR_STOCKS: list[tuple[str, str, str, str]] = [
 ]
 
 # Human-readable label → (Interval, description)
-FREQUENCY_OPTIONS: dict[str, tuple[Interval, str]] = {
+FREQUENCY_OPTIONS: Dict[str, Tuple[Interval, str]] = {
     "📅  Daily  (recommended for beginners)": (
         Interval.DAY,
         "One data point per trading day. Best for understanding long-term price trends.",

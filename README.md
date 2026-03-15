@@ -100,21 +100,25 @@ df = client.get_data(fut_token, "2024-01-02", "2024-01-25", Interval.MINUTE_1, o
 
 ```bash
 # Daily data for NIFTY 50 — print to terminal
-pyzdata --enctoken TOKEN "NIFTY 50" NSE 2024-01-01 2024-12-31
+pyzdata download --enctoken TOKEN --symbol "NIFTY 50" --exchange NSE \
+        --start 2024-01-01 --end 2024-12-31
 
 # 1-minute data — save to CSV
-pyzdata --enctoken TOKEN RELIANCE NSE 2024-01-01 2024-06-30 \
+pyzdata download --enctoken TOKEN --symbol RELIANCE --exchange NSE \
+        --start 2024-01-01 --end 2024-06-30 \
         --interval minute --output reliance.csv
 
 # Login with credentials
-pyzdata --user-id AB1234 --password pw --totp 123456 \
-        RELIANCE NSE 2024-01-01 2024-01-31
+pyzdata download --user-id AB1234 --password pw --totp 123456 \
+        --symbol RELIANCE --exchange NSE \
+        --start 2024-01-01 --end 2024-01-31
 
 # Search for a symbol
-pyzdata --enctoken TOKEN search HDFC --exchange NSE
+pyzdata search --enctoken TOKEN --query HDFC --exchange NSE
 
 # All options
-pyzdata --help
+pyzdata download --help
+pyzdata search --help
 ```
 
 ---
@@ -190,10 +194,15 @@ pyzdata/
 ├── models.py        Interval enum
 ├── config.py        Settings + environment variable loading
 ├── exceptions.py    Typed exception hierarchy
-└── cli.py           pyzdata command-line tool
+├── cli.py           pyzdata command-line tool
+├── _app.py          Streamlit web interface
+└── py.typed         PEP 561 type-checking marker
 
-app.py               Streamlit web interface
-tests/               48 unit tests (no credentials needed)
+app.py               Local dev launcher for Streamlit
+tests/               Unit tests (no credentials needed)
+CONTRIBUTING.md      How to contribute
+CHANGELOG.md         Release history
+SECURITY.md          Security policy
 ```
 
 ---
@@ -223,6 +232,18 @@ The enctoken refreshes each time you log in to Kite.
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Author
 
