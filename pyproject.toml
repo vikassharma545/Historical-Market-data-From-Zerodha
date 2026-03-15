@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyzdata"
-version = "1.0.2"
+version = "1.0.3"
 description = "Indian Historical Market Data Downloader from Zerodha"
 readme = "README.md"
 license = { text = "MIT" }
