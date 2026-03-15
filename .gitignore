@@ -1,4 +1,51 @@
-.idea
-__pycache__
-test.ipynb
-.ipynb_checkpoints
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Secrets — NEVER commit these ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Instruments cache (downloaded at runtime, not source code) ───────────────
+.pyzdata/
+
+# ── Test / coverage artefacts ────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ── IDE / editor ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Jupyter ──────────────────────────────────────────────────────────────────
+*.ipynb
+.ipynb_checkpoints/
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Claude Code local settings ───────────────────────────────────────────────
+.claude/
+
+# ── Streamlit ────────────────────────────────────────────────────────────────
+.streamlit/secrets.toml
