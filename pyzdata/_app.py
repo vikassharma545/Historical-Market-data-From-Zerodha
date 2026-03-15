@@ -103,8 +103,12 @@ def get_client() -> PyZData | None:
 
 
 def _set_stock(symbol: str, exchange: str) -> None:
-    st.session_state["sym"]  = symbol
-    st.session_state["exch"] = exchange
+    # Write to staging keys — the real "sym"/"exch" keys are owned by already-
+    # rendered widgets in this run and cannot be mutated after instantiation.
+    # On the next rerun, render_download_tab() moves these into "sym"/"exch"
+    # BEFORE the widgets are created, so Streamlit accepts the update.
+    st.session_state["_sym_next"]  = symbol
+    st.session_state["_exch_next"] = exchange
 
 
 def _set_dates(days: int) -> None:
@@ -287,6 +291,14 @@ def render_download_tab() -> None:
     if not is_logged_in():
         render_welcome()
         return
+
+    # Apply any pending stock selection from chip buttons.  Must happen BEFORE
+    # the text_input / selectbox widgets are instantiated, otherwise Streamlit
+    # raises "cannot be modified after the widget … is instantiated".
+    if "_sym_next" in st.session_state:
+        st.session_state["sym"]  = st.session_state.pop("_sym_next")
+    if "_exch_next" in st.session_state:
+        st.session_state["exch"] = st.session_state.pop("_exch_next")
 
     client = get_client()
 
