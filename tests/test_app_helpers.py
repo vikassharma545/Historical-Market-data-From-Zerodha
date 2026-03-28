@@ -13,7 +13,6 @@ from pyzdata._app import (
 )
 from pyzdata.models import Interval
 
-
 # ── _friendly_auth_error ────────────────────────────────────────────────────
 
 

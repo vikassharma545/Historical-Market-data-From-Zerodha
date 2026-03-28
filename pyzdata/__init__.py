@@ -11,6 +11,14 @@ Quick start::
     print(df.head())
 """
 
+try:
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("pyzdata")
+except (PackageNotFoundError, ModuleNotFoundError):
+    __version__ = "0.0.0-dev"
+
 from .client import PyZData
 from .config import Config
 from .exceptions import (
@@ -21,13 +29,6 @@ from .exceptions import (
     PyZDataError,
 )
 from .models import Interval
-
-try:
-    from importlib.metadata import PackageNotFoundError, version as _pkg_version
-
-    __version__ = _pkg_version("pyzdata")
-except (PackageNotFoundError, ModuleNotFoundError):
-    __version__ = "0.0.0-dev"
 
 __all__ = [
     "PyZData",
