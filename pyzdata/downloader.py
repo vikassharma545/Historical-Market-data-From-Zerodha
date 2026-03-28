@@ -27,7 +27,9 @@ Design decisions
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from typing import Callable, Dict, Generator, List, Optional, Tuple
 
 import pandas as pd
@@ -51,6 +53,25 @@ def _expected_cols(oi: bool) -> List[str]:
     return _OI_COLS if oi else _BASE_COLS
 
 
+class _Throttle:
+    """Thread-safe rate limiter that enforces a minimum gap between calls."""
+
+    def __init__(self, max_per_second: float) -> None:
+        self._min_interval = 1.0 / max_per_second if max_per_second > 0 else 0.0
+        self._lock = Lock()
+        self._last_call = 0.0
+
+    def wait(self) -> None:
+        if self._min_interval <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_call
+            if elapsed < self._min_interval:
+                time.sleep(self._min_interval - elapsed)
+            self._last_call = time.monotonic()
+
+
 class DataDownloader:
     """Downloads OHLCV (and optional OI) candles from the Kite historical API."""
 
@@ -67,6 +88,7 @@ class DataDownloader:
         self._headers = auth_headers
         self._instruments = instruments
         self._config = config
+        self._throttle = _Throttle(config.rate_limit_per_second)
 
     # ---------------------------------------------------------------- public
 
@@ -162,7 +184,8 @@ class DataDownloader:
         results: List[Optional[pd.DataFrame]] = [None] * len(windows)
         total_windows = len(windows)
         completed = 0
-        
+        progress_lock = Lock()
+
         with ThreadPoolExecutor(max_workers=self._config.max_workers) as pool:
             future_to_idx = {
                 pool.submit(self._fetch_window, token, s, e, interval, oi, symbol): i
@@ -175,10 +198,11 @@ class DataDownloader:
                 except DataFetchError as exc:
                     logger.error("Window %d failed: %s", idx, exc)
                     results[idx] = pd.DataFrame()
-                
-                completed += 1
-                if progress_callback:
-                    progress_callback(completed, total_windows)
+
+                with progress_lock:
+                    completed += 1
+                    if progress_callback:
+                        progress_callback(completed, total_windows)
 
         return [r for r in results if r is not None and not r.empty]
 
@@ -203,6 +227,7 @@ class DataDownloader:
         }
         logger.debug("GET %s | from=%s to=%s", url, params["from"], params["to"])
 
+        self._throttle.wait()
         try:
             resp = self._session.get(
                 url,

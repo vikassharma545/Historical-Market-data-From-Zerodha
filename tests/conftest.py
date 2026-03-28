@@ -26,6 +26,7 @@ def config(tmp_path) -> Config:
         instruments_cache_ttl_hours=0,
         instruments_cache_path=str(tmp_path / "instruments.csv"),
         max_workers=1,
+        rate_limit_per_second=0,
         log_level="ERROR",
     )
 

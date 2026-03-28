@@ -22,10 +22,18 @@ from .exceptions import (
 )
 from .models import Interval
 
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    __version__ = _pkg_version("pyzdata")
+except (PackageNotFoundError, ModuleNotFoundError):
+    __version__ = "0.0.0-dev"
+
 __all__ = [
     "PyZData",
     "Interval",
     "Config",
+    "__version__",
     # Exceptions — exported so callers can write `except pyzdata.DataFetchError`
     "PyZDataError",
     "AuthenticationError",
@@ -33,10 +41,3 @@ __all__ = [
     "DataFetchError",
     "ConfigurationError",
 ]
-
-try:
-    from importlib.metadata import version as _pkg_version
-
-    __version__ = _pkg_version("pyzdata")
-except Exception:  # package not installed (editable / dev checkout)
-    __version__ = "0.0.0-dev"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyzdata"
-version = "1.0.5"
+version = "1.0.6"
 description = "Indian Historical Market Data Downloader from Zerodha"
 readme = "README.md"
 license = { text = "MIT" }
@@ -21,19 +21,20 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business :: Financial :: Investment",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "pandas>=1.3.0",
-    "requests>=2.25.0",
+    "pandas>=2.3.0",
+    "requests>=2.32.0",
     "urllib3>=1.26.0",
 ]
 
 [project.optional-dependencies]
 # Web interface: pip install "pyzdata[web]"
 web = [
-    "streamlit>=1.20.0",
+    "streamlit>=1.50.0",
 ]
 # Development / testing: pip install "pyzdata[dev]"
 dev = [

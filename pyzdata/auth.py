@@ -125,7 +125,7 @@ class KiteAuth:
 
         try:
             payload = resp.json()
-        except Exception:
+        except (ValueError, requests.JSONDecodeError):
             payload = {}
         if payload.get("status") != "success":
             raise AuthenticationError(

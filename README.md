@@ -54,7 +54,7 @@ pip install pyzdata
 pip install "pyzdata[web]"
 ```
 
-**Requirements:** Python 3.8+, pandas ≥ 1.3, requests ≥ 2.25
+**Requirements:** Python 3.10+, pandas ≥ 2.0, requests ≥ 2.32
 
 For development:
 
@@ -94,6 +94,16 @@ df = client.get_data(fut_token, "2024-01-02", "2024-01-25", Interval.MINUTE_1, o
 ```
 
 **Output columns:** `tradingsymbol, datetime, open, high, low, close, volume` (+ `open_interest` when `oi=True`)
+
+**Context manager** — automatically closes the HTTP session when done:
+
+```python
+with PyZData(enctoken="your_enctoken") as client:
+    token = client.get_instrument_token("RELIANCE", "NSE")
+    df = client.get_data(token, "2024-01-01", "2024-12-31", Interval.DAY)
+    df.to_csv("reliance.csv", index=False)
+# session is closed automatically here
+```
 
 ---
 
@@ -147,6 +157,7 @@ Copy `.env.example` to `.env` and set any values you want to override:
 | `PYZDATA_MAX_RETRIES` | `5` | Retry attempts on failures |
 | `PYZDATA_TIMEOUT` | `30` | HTTP timeout in seconds |
 | `PYZDATA_CACHE_TTL_HOURS` | `24` | How long to cache the instruments list |
+| `PYZDATA_RATE_LIMIT` | `3.0` | Max API requests per second (0 = disabled) |
 | `PYZDATA_LOG_LEVEL` | `WARNING` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
 Or pass a `Config` object in code:
@@ -197,10 +208,11 @@ pyzdata/
 ├── exceptions.py    Typed exception hierarchy
 ├── cli.py           pyzdata command-line tool
 ├── _app.py          Streamlit web interface
+├── run_web.py       Entry point for pyzdata-web command
 └── py.typed         PEP 561 type-checking marker
 
 app.py               Local dev launcher for Streamlit
-tests/               Unit tests (no credentials needed)
+tests/               Unit tests (90 tests, no credentials needed)
 CONTRIBUTING.md      How to contribute
 CHANGELOG.md         Release history
 SECURITY.md          Security policy

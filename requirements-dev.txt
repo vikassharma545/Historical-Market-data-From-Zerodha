@@ -1,9 +1,0 @@
-# Development and testing dependencies
-# Install with: pip install -r requirements-dev.txt
-
-# Testing
-pytest>=7.0
-pytest-mock>=3.10
-
-# Optional: linting / formatting
-ruff>=0.1.0

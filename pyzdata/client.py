@@ -95,32 +95,48 @@ class PyZData:
         _configure_library_logging(self._config.log_level)
 
         self._session = _build_session(self._config)
-        authenticator = KiteAuth(self._session, self._config)
+        try:
+            authenticator = KiteAuth(self._session, self._config)
 
-        if enctoken is not None:
-            _token = enctoken
-            logger.info("Using pre-supplied enctoken.")
-        elif user_id is not None and password is not None and totp is not None:
-            _token = authenticator.login_with_credentials(
-                user_id, password, str(totp)
+            if enctoken is not None:
+                _token = enctoken
+                logger.info("Using pre-supplied enctoken.")
+            elif user_id is not None and password is not None and totp is not None:
+                _token = authenticator.login_with_credentials(
+                    user_id, password, str(totp)
+                )
+            else:
+                raise ConfigurationError(
+                    "Provide either 'enctoken' or all three of "
+                    "('user_id', 'password', 'totp')."
+                )
+
+            self._auth_headers = KiteAuth.make_auth_headers(_token)
+
+            self._instruments = InstrumentManager(self._session, self._config)
+            self._instruments.load()
+
+            self._downloader = DataDownloader(
+                self._session,
+                self._auth_headers,
+                self._instruments,
+                self._config,
             )
-        else:
-            raise ConfigurationError(
-                "Provide either 'enctoken' or all three of "
-                "('user_id', 'password', 'totp')."
-            )
+        except Exception:
+            self._session.close()
+            raise
 
-        self._auth_headers = KiteAuth.make_auth_headers(_token)
+    # -------------------------------------------------------- context manager
 
-        self._instruments = InstrumentManager(self._session, self._config)
-        self._instruments.load()
+    def close(self) -> None:
+        """Close the underlying HTTP session and release connection pool resources."""
+        self._session.close()
 
-        self._downloader = DataDownloader(
-            self._session,
-            self._auth_headers,
-            self._instruments,
-            self._config,
-        )
+    def __enter__(self) -> PyZData:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     # ---------------------------------------------------------------- public
 

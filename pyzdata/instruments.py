@@ -60,7 +60,13 @@ class InstrumentManager:
             self._df = self._download()
             if cache_path:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
-                self._df.to_csv(cache_path, index=False)
+                tmp_path = cache_path.with_suffix(".csv.tmp")
+                try:
+                    self._df.to_csv(tmp_path, index=False)
+                    tmp_path.replace(cache_path)
+                except OSError:
+                    tmp_path.unlink(missing_ok=True)
+                    raise
                 logger.debug("Instruments cached to %s", cache_path)
 
     def get_token(self, tradingsymbol: str, exchange: str) -> int:

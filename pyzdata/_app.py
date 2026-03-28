@@ -6,9 +6,10 @@ Run with:
 
 from __future__ import annotations
 
+import io
 from datetime import date, timedelta
 from typing import Dict, List, Tuple
-import io
+
 import pandas as pd
 import streamlit as st
 

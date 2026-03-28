@@ -18,6 +18,8 @@ import os
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from .exceptions import ConfigurationError
+
 
 @dataclass
 class Config:
@@ -55,6 +57,9 @@ class Config:
     # --------------------------------------------------- Parallel downloads
     #: Maximum worker threads for concurrent monthly fetches.
     max_workers: int = 4
+    #: Maximum API requests per second.  Zerodha's historical data endpoint
+    #: typically allows ~3 req/s.  Set to ``0`` to disable throttling.
+    rate_limit_per_second: float = 3.0
 
     # ----------------------------------------------------------------- Log
     #: Python logging level name for the ``pyzdata`` logger hierarchy.
@@ -73,13 +78,38 @@ class Config:
             export PYZDATA_LOG_LEVEL=DEBUG
         """
         return cls(
-            max_retries=int(os.getenv("PYZDATA_MAX_RETRIES", 5)),
-            backoff_factor=float(os.getenv("PYZDATA_BACKOFF_FACTOR", 1.0)),
-            request_timeout=int(os.getenv("PYZDATA_TIMEOUT", 30)),
-            max_workers=int(os.getenv("PYZDATA_MAX_WORKERS", 4)),
+            max_retries=_env_int("PYZDATA_MAX_RETRIES", 5),
+            backoff_factor=_env_float("PYZDATA_BACKOFF_FACTOR", 1.0),
+            request_timeout=_env_int("PYZDATA_TIMEOUT", 30),
+            max_workers=_env_int("PYZDATA_MAX_WORKERS", 4),
+            rate_limit_per_second=_env_float("PYZDATA_RATE_LIMIT", 3.0),
             instruments_cache_path=os.getenv("PYZDATA_CACHE_PATH") or None,
-            instruments_cache_ttl_hours=float(
-                os.getenv("PYZDATA_CACHE_TTL_HOURS", 24.0)
+            instruments_cache_ttl_hours=_env_float(
+                "PYZDATA_CACHE_TTL_HOURS", 24.0
             ),
             log_level=os.getenv("PYZDATA_LOG_LEVEL", "WARNING").upper(),
+        )
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise ConfigurationError(
+            f"Environment variable {name}={raw!r} is not a valid integer"
+        )
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        raise ConfigurationError(
+            f"Environment variable {name}={raw!r} is not a valid number"
         )
