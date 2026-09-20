@@ -74,6 +74,12 @@ class InstrumentManager:
                     raise
                 logger.debug("Instruments cached to %s", cache_path)
 
+    @property
+    def dataframe(self) -> pd.DataFrame:
+        """The loaded instruments master.  Treat it as read-only."""
+        self._require_loaded()
+        return self._df
+
     def get_token(self, tradingsymbol: str, exchange: str) -> int:
         """Return the ``instrument_token`` for a symbol + exchange pair.
 
