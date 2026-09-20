@@ -34,7 +34,11 @@ def main() -> None:
 
     try:
         subprocess.run(
-            [sys.executable, "-m", "streamlit", "run", str(app_file)],
+            [
+                sys.executable, "-m", "streamlit", "run", str(app_file),
+                # Hide Streamlit's developer menu — this is an end-user app.
+                "--client.toolbarMode", "minimal",
+            ],
             check=True,
         )
     except KeyboardInterrupt:

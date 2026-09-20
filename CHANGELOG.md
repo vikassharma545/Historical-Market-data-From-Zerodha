@@ -5,6 +5,36 @@ All notable changes to PyZData are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-20
+
+### Added
+- **Rewritten web app** — one page instead of a sidebar and three tabs: login form
+  (Enter submits), searchable instrument dropdown, underlying → contract picker for
+  F&O, one-click period and interval, price chart, and **Excel export**
+- **Enctoken validation** — `PyZData(enctoken=...)` checks the token against Kite and
+  raises `AuthenticationError` immediately instead of failing mid-download
+- `PyZData.user_name` and `PyZData.instruments` properties
+- `PartialDataError` (subclass of `DataFetchError`) with `.partial_data` and `.failed_ranges`
+- CLI reads the enctoken from `PYZDATA_ENCTOKEN` when `--enctoken` is not given
+- `NCO` exchange in the web app
+- Web app smoke tests using Streamlit's `AppTest`
+
+### Changed
+- **Interval-aware request windows** — ranges are split by Kite's per-request limit
+  (60–2000 days depending on interval) instead of by calendar month. Five years of daily
+  candles: 60 requests → 1
+- **Failed date ranges are no longer dropped silently.** They are retried once; if they
+  still fail, `get_data` raises `PartialDataError` (the CLI saves the partial data, warns,
+  and exits with code 2). Previously the result simply had gaps
+- When every request fails, the real error is raised (an expired session says so) instead
+  of returning an empty DataFrame
+- Symbol lookup ignores case and extra whitespace; the not-found error suggests close matches
+- `web` extra now requires `streamlit>=1.55` and includes `openpyxl`
+
+### Fixed
+- README advertised Excel export that did not exist
+- Help text described Kite's per-request limits as the maximum available history
+
 ## [1.0.6] - 2025-03-28
 
 ### Added

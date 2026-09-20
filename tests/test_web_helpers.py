@@ -33,6 +33,7 @@ def instruments() -> pd.DataFrame:
         (2, "RELIANCE",      "NSE", "RELIANCE INDUSTRIES", None,         0.0,   "EQ"),
         (3, "NIFTY 50",      "NSE", "NIFTY 50",            None,         0.0,   "EQ"),
         (4, "ABB",           "NSE", None,                  None,         0.0,   "EQ"),
+        (10, "0IRFC35-N0",   "NSE", "IRFC BOND",           None,         0.0,   "EQ"),
         (5, "RELIANCE",      "BSE", "RELIANCE INDUSTRIES", None,         0.0,   "EQ"),
         (6, "NIFTY24FEBFUT", "NFO", "NIFTY",               "2024-02-29", 0.0,   "FUT"),
         (7, "NIFTY24JANFUT", "NFO", "NIFTY",               "2024-01-25", 0.0,   "FUT"),
@@ -90,9 +91,9 @@ class TestInstrumentOptions:
     def test_only_the_requested_exchange(self, instruments):
         assert set(instrument_options(instruments, "BSE")) == {"RELIANCE"}
 
-    def test_popular_first_then_alphabetical(self, instruments):
+    def test_popular_first_then_alphabetical_with_numeric_symbols_last(self, instruments):
         assert list(instrument_options(instruments, "NSE")) == [
-            "NIFTY 50", "RELIANCE", "ABB", "ZOMATO",
+            "NIFTY 50", "RELIANCE", "ABB", "ZOMATO", "0IRFC35-N0",
         ]
 
     def test_label_includes_company_name(self, instruments):
@@ -108,9 +109,9 @@ class TestDerivativePickers:
     def test_underlyings_popular_first(self, instruments):
         assert underlyings(instruments, "NFO") == ["NIFTY", "ACC"]
 
-    def test_contracts_sorted_by_expiry_with_futures_first(self, instruments):
+    def test_futures_first_then_options_each_by_expiry(self, instruments):
         assert list(contract_options(instruments, "NFO", "NIFTY")) == [
-            "NIFTY24JANFUT", "NIFTY24JAN21500CE", "NIFTY24FEBFUT",
+            "NIFTY24JANFUT", "NIFTY24FEBFUT", "NIFTY24JAN21500CE",
         ]
 
     def test_contract_label_shows_type_and_expiry(self, instruments):

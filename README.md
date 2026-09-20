@@ -35,12 +35,12 @@ pyzdata-web
 
 Then open `http://localhost:8501` in your browser.
 
-**Features:**
-- Click popular stocks (NIFTY 50, RELIANCE, TCS, HDFC Bank …) — no typing needed
-- Quick date presets: Last Week, Last Month, Last Year, Last 3 Years …
-- Plain-English frequency selector with descriptions
-- Download result as **CSV** or **Excel (.xlsx)**
-- Built-in Help tab with step-by-step guides
+Everything is on one page:
+
+1. **Log in** — paste your enctoken (checked immediately) or use your user ID, password and TOTP
+2. **Pick an instrument** — a searchable dropdown of everything Zerodha lists; for futures & options pick the underlying, then the contract
+3. **Pick a period and interval** — one click each (`1W` … `5Y` or custom dates; `Day` … `1 min`)
+4. **Download** — see a price chart and save the result as **CSV** or **Excel (.xlsx)**
 
 ---
 
@@ -95,6 +95,12 @@ df = client.get_data(fut_token, "2024-01-02", "2024-01-25", Interval.MINUTE_1, o
 
 **Output columns:** `tradingsymbol, datetime, open, high, low, close, volume` (+ `open_interest` when `oi=True`)
 
+Symbol lookup forgives case and extra spaces (`"reliance"` works), and an invalid or
+expired enctoken is rejected as soon as the client is created.
+
+Long ranges are split into as few requests as Zerodha allows — 5 years of daily candles
+is a single request; 1-minute candles need one request per 60 days.
+
 **Context manager** — automatically closes the HTTP session when done:
 
 ```python
@@ -127,6 +133,10 @@ pyzdata download --user-id AB1234 --password pw --totp 123456 \
 # Search for a symbol
 pyzdata search --enctoken TOKEN --query HDFC --exchange NSE
 
+# Keep the token out of your shell history
+export PYZDATA_ENCTOKEN=TOKEN        # PowerShell: $env:PYZDATA_ENCTOKEN = "TOKEN"
+pyzdata download --symbol RELIANCE --exchange NSE --start 2024-01-01 --end 2024-12-31
+
 # All options
 pyzdata download --help
 pyzdata search --help
@@ -149,7 +159,7 @@ pyzdata search --help
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set any values you want to override:
+Set any of these environment variables to override the defaults (`.env.example` lists them all):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -159,6 +169,7 @@ Copy `.env.example` to `.env` and set any values you want to override:
 | `PYZDATA_CACHE_TTL_HOURS` | `24` | How long to cache the instruments list |
 | `PYZDATA_RATE_LIMIT` | `3.0` | Max API requests per second (0 = disabled) |
 | `PYZDATA_LOG_LEVEL` | `WARNING` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `PYZDATA_ENCTOKEN` | – | Enctoken used by the CLI when `--enctoken` is not given |
 
 Or pass a `Config` object in code:
 
@@ -178,6 +189,7 @@ from pyzdata.exceptions import (
     AuthenticationError,    # wrong credentials or expired enctoken
     InstrumentNotFoundError, # symbol not found
     DataFetchError,          # API or network failure
+    PartialDataError,        # some date ranges failed — carries the rest
     PyZDataError,            # catch-all base class
 )
 
@@ -189,9 +201,15 @@ except AuthenticationError as e:
     print(f"Login failed: {e}")
 except InstrumentNotFoundError as e:
     print(f"Symbol not found: {e}")
+except PartialDataError as e:          # must come before DataFetchError
+    print(f"Gaps at {e.failed_ranges}")
+    df = e.partial_data                 # everything that did download
 except DataFetchError as e:
     print(f"Download failed: {e}")
 ```
+
+PyZData never hands you data with silent gaps: a date range that still fails after a
+retry raises `PartialDataError` instead.
 
 ---
 
@@ -202,17 +220,18 @@ pyzdata/
 ├── client.py        PyZData — main entry point
 ├── auth.py          Two-step Zerodha login
 ├── instruments.py   Symbol lookup with 24-hour disk cache
-├── downloader.py    Parallel monthly data fetching
+├── downloader.py    Parallel, interval-aware data fetching
 ├── models.py        Interval enum
 ├── config.py        Settings + environment variable loading
 ├── exceptions.py    Typed exception hierarchy
 ├── cli.py           pyzdata command-line tool
 ├── _app.py          Streamlit web interface
+├── _web_helpers.py  Streamlit-free logic behind the web interface
 ├── run_web.py       Entry point for pyzdata-web command
 └── py.typed         PEP 561 type-checking marker
 
 app.py               Local dev launcher for Streamlit
-tests/               Unit tests (90 tests, no credentials needed)
+tests/               Unit tests (no credentials or network needed)
 CONTRIBUTING.md      How to contribute
 CHANGELOG.md         Release history
 SECURITY.md          Security policy
@@ -223,7 +242,7 @@ SECURITY.md          Security policy
 ## Running Tests
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[web,dev]"
 pytest
 ```
 

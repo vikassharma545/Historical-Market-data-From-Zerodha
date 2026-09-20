@@ -19,15 +19,15 @@ from .models import Interval
 # Static tables
 # ─────────────────────────────────────────────────────────────────────────────
 
-EXCHANGES: List[str] = ["NSE", "BSE", "NFO", "BFO", "MCX", "CDS"]
+EXCHANGES: List[str] = ["NSE", "BSE", "NFO", "BFO", "MCX", "NCO", "CDS"]
 
 #: Exchanges that list dated contracts.  They get the two-step picker
 #: (underlying → contract) and the open-interest option.
-DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO", "MCX", "CDS"})
+DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO", "MCX", "NCO", "CDS"})
 
 EXCHANGE_HELP = (
     "NSE / BSE — stocks and indices.  NFO / BFO — futures & options.  "
-    "MCX — commodities.  CDS — currency."
+    "MCX / NCO — commodities.  CDS — currency."
 )
 
 #: Shown at the top of the stock dropdown so the common picks need no typing.
@@ -91,7 +91,10 @@ def period_to_dates(label: str, today: date) -> Tuple[date, date]:
 def _popular_first(values: List[str], popular: List[str]) -> List[str]:
     present = set(values)
     head = [v for v in popular if v in present]
-    return head + sorted(present - set(head))
+    # Symbols starting with a digit are bonds and the like — useful, but they
+    # shouldn't bury the shares, so they sort last.
+    rest = sorted(present - set(head), key=lambda v: (v[:1].isdigit(), v))
+    return head + rest
 
 
 def instrument_options(instruments: pd.DataFrame, exchange: str) -> Dict[str, str]:
@@ -119,14 +122,17 @@ def underlyings(instruments: pd.DataFrame, exchange: str) -> List[str]:
 def contract_options(
     instruments: pd.DataFrame, exchange: str, underlying: str
 ) -> Dict[str, str]:
-    """``{tradingsymbol: label}`` for one underlying: nearest expiry first,
-    futures ahead of options, options by strike."""
+    """``{tradingsymbol: label}`` for one underlying.
+
+    Futures come first (a handful, and the usual pick), then the options —
+    often well over a thousand — each group by expiry, options by strike.
+    """
     rows = instruments[
         (instruments["exchange"] == exchange) & (instruments["name"] == underlying)
     ].copy()
     rows["_expiry"] = pd.to_datetime(rows["expiry"], errors="coerce")
     rows["_is_option"] = rows["instrument_type"] != "FUT"
-    rows = rows.sort_values(["_expiry", "_is_option", "strike", "tradingsymbol"])
+    rows = rows.sort_values(["_is_option", "_expiry", "strike", "tradingsymbol"])
 
     options: Dict[str, str] = {}
     for symbol, kind, expiry in zip(rows["tradingsymbol"], rows["instrument_type"], rows["_expiry"]):

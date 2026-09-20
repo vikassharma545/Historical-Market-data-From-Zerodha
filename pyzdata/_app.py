@@ -384,7 +384,7 @@ volume` (plus `open_interest` for futures & options). Times are in IST.
 much bigger files and take longer to download.
 
 **I can't find my instrument.** Check the exchange first — shares and indices are on
-NSE / BSE, futures & options on NFO / BFO, commodities on MCX, currency on CDS. Then type
+NSE / BSE, futures & options on NFO / BFO, commodities on MCX / NCO, currency on CDS. Then type
 part of the name in the dropdown. Expired contracts are not available from Zerodha.
 
 **What is open interest?** The number of futures or options contracts still open. It only
