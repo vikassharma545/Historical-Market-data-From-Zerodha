@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from pyzdata.cli import _build_parser, main
+from pyzdata.cli import _build_client, _build_parser, main
 
 
 class TestBuildParser:
@@ -154,3 +154,54 @@ class TestMainErrorPaths:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 130
+
+
+class TestEnctokenFromEnvironment:
+
+    _ARGS = ["download", "-s", "RELIANCE", "-e", "NSE", "--start", "2024-01-01", "--end", "2024-06-30"]
+
+    def test_env_var_replaces_the_flag(self, monkeypatch):
+        monkeypatch.setenv("PYZDATA_ENCTOKEN", "ENV_TOKEN")
+        args = _build_parser().parse_args(self._ARGS)
+        assert args.enctoken == "ENV_TOKEN"
+
+    def test_explicit_flag_wins(self, monkeypatch):
+        monkeypatch.setenv("PYZDATA_ENCTOKEN", "ENV_TOKEN")
+        args = _build_parser().parse_args(self._ARGS + ["--enctoken", "FLAG_TOKEN"])
+        assert args.enctoken == "FLAG_TOKEN"
+
+    @patch("pyzdata.cli.PyZData")
+    def test_user_id_wins_over_env_token(self, mock_client, monkeypatch):
+        monkeypatch.setenv("PYZDATA_ENCTOKEN", "ENV_TOKEN")
+        args = _build_parser().parse_args(
+            self._ARGS + ["--user-id", "AB1234", "--password", "pw", "--totp", "123456"]
+        )
+        _build_client(args)
+        mock_client.assert_called_once_with(user_id="AB1234", password="pw", totp="123456")
+
+    def test_auth_still_required_without_env(self, monkeypatch):
+        monkeypatch.delenv("PYZDATA_ENCTOKEN", raising=False)
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(self._ARGS)
+
+
+class TestPartialDownload:
+
+    @patch("pyzdata.cli._build_client")
+    @patch("sys.argv", TestMainErrorPaths._DOWNLOAD_ARGS + ["-o", "out.csv"])
+    def test_partial_data_is_saved_and_exits_2(self, mock_build, tmp_path, monkeypatch, capsys):
+        import pandas as pd
+
+        from pyzdata.exceptions import PartialDataError
+
+        monkeypatch.chdir(tmp_path)
+        partial = pd.DataFrame({"datetime": ["2024-01-02"], "close": [100.0]})
+        mock_build.return_value.get_data.side_effect = PartialDataError(
+            "1 of 3 date ranges failed", partial_data=partial, failed_ranges=[]
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 2
+        assert (tmp_path / "out.csv").exists()
+        assert "1 of 3 date ranges failed" in capsys.readouterr().err
