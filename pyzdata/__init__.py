@@ -26,6 +26,7 @@ from .exceptions import (
     ConfigurationError,
     DataFetchError,
     InstrumentNotFoundError,
+    PartialDataError,
     PyZDataError,
 )
 from .models import Interval
@@ -40,5 +41,6 @@ __all__ = [
     "AuthenticationError",
     "InstrumentNotFoundError",
     "DataFetchError",
+    "PartialDataError",
     "ConfigurationError",
 ]
