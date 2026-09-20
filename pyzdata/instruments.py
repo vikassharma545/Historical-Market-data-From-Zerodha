@@ -36,6 +36,11 @@ _SYMBOL_COL   = "tradingsymbol"
 _EXCHANGE_COL = "exchange"
 
 
+def _normalise(symbol: str) -> str:
+    """Upper-case and collapse whitespace so lookups forgive sloppy typing."""
+    return " ".join(symbol.upper().split())
+
+
 class InstrumentManager:
     """Loads and queries the Zerodha instruments master CSV."""
 
@@ -78,15 +83,25 @@ class InstrumentManager:
             When the symbol/exchange combination does not exist.
         """
         self._require_loaded()
-        mask = (
-            (self._df[_SYMBOL_COL] == tradingsymbol)
-            & (self._df[_EXCHANGE_COL] == exchange)
-        )
-        result = self._df[mask]
+        exchange = exchange.strip().upper()
+        on_exchange = self._df[self._df[_EXCHANGE_COL] == exchange]
+
+        result = on_exchange[on_exchange[_SYMBOL_COL] == tradingsymbol]
         if result.empty:
+            # Forgive case and stray whitespace: "  nifty  50 " → "NIFTY 50".
+            wanted = _normalise(tradingsymbol)
+            normalised = on_exchange[_SYMBOL_COL].astype(str).map(_normalise)
+            result = on_exchange[normalised == wanted]
+
+        if result.empty:
+            close = self.search(tradingsymbol.strip(), exchange)[_SYMBOL_COL].head(5).tolist()
+            hint = (
+                f"Did you mean: {', '.join(close)}?"
+                if close
+                else f"Try client.search_instruments('{tradingsymbol}') to find the correct symbol."
+            )
             raise InstrumentNotFoundError(
-                f"No instrument found: symbol='{tradingsymbol}' exchange='{exchange}'. "
-                f"Try client.search_instruments('{tradingsymbol}') to find the correct symbol."
+                f"No instrument found: symbol='{tradingsymbol}' exchange='{exchange}'. {hint}"
             )
         return int(result.iloc[0][_TOKEN_COL])
 

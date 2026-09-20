@@ -161,3 +161,23 @@ class TestRequireLoaded:
         mgr = InstrumentManager(mock_session, config)
         with pytest.raises(RuntimeError, match="not loaded"):
             mgr.get_token("X", "NSE")
+
+
+# ---------------------------------------------------------------------------
+# get_token() — forgiving lookup
+# ---------------------------------------------------------------------------
+
+class TestForgivingLookup:
+
+    def test_lowercase_symbol_and_exchange(self, mock_session, config, instruments_csv_text):
+        mgr = _loaded_manager(mock_session, config, instruments_csv_text)
+        assert mgr.get_token("reliance", "nse") == 408065
+
+    def test_extra_whitespace(self, mock_session, config, instruments_csv_text):
+        mgr = _loaded_manager(mock_session, config, instruments_csv_text)
+        assert mgr.get_token("  nifty   50 ", "NSE") == 256265
+
+    def test_not_found_lists_close_matches(self, mock_session, config, instruments_csv_text):
+        mgr = _loaded_manager(mock_session, config, instruments_csv_text)
+        with pytest.raises(InstrumentNotFoundError, match="NIFTY 50"):
+            mgr.get_token("NIFTY", "NSE")
