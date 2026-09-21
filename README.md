@@ -54,7 +54,7 @@ pip install pyzdata
 pip install "pyzdata[web]"
 ```
 
-**Requirements:** Python 3.10+, pandas ≥ 2.0, requests ≥ 2.32
+**Requirements:** Python 3.10+, pandas ≥ 2.3, requests ≥ 2.32
 
 For development:
 
