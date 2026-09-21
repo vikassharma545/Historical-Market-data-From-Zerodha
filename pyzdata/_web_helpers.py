@@ -6,7 +6,6 @@ without a running Streamlit session.  The UI itself lives in :mod:`pyzdata._app`
 
 from __future__ import annotations
 
-import io
 import re
 from datetime import date, timedelta
 from typing import Dict, List, Tuple
@@ -69,9 +68,6 @@ INTERVALS: Dict[str, Interval] = {
 
 #: The intervals shown as one-click pills; the rest sit behind "Other".
 MAIN_INTERVALS: List[str] = ["Day", "1 hour", "30 min", "15 min", "5 min", "1 min"]
-
-#: Excel worksheets hold 1,048,576 rows including the header.
-EXCEL_MAX_ROWS = 1_048_575
 
 
 def period_to_dates(label: str, today: date) -> Tuple[date, date]:
@@ -201,10 +197,3 @@ def file_stem(symbol: str, df: pd.DataFrame, interval_label: str) -> str:
     """``NIFTY_50_Day_2024-01-01_2024-12-31`` — a safe, descriptive file name."""
     safe = re.sub(r"[^A-Za-z0-9]+", "_", f"{symbol} {interval_label}").strip("_")
     return f"{safe}_{df['datetime'].min().date()}_{df['datetime'].max().date()}"
-
-
-def to_excel_bytes(df: pd.DataFrame) -> bytes:
-    """Serialise *df* as an ``.xlsx`` workbook (requires ``openpyxl``)."""
-    buffer = io.BytesIO()
-    df.to_excel(buffer, index=False, sheet_name="data", engine="openpyxl")
-    return buffer.getvalue()

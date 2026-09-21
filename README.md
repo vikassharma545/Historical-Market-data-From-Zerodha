@@ -50,7 +50,7 @@ Everything is on one page:
 # Library only (Python API + CLI)
 pip install pyzdata
 
-# Library + web interface (adds streamlit and openpyxl)
+# Library + web interface (adds streamlit)
 pip install "pyzdata[web]"
 ```
 
@@ -227,6 +227,7 @@ pyzdata/
 ├── cli.py           pyzdata command-line tool
 ├── _app.py          Streamlit web interface
 ├── _web_helpers.py  Streamlit-free logic behind the web interface
+├── _xlsx.py         Fast, dependency-free Excel (.xlsx) writer
 ├── run_web.py       Entry point for pyzdata-web command
 └── py.typed         PEP 561 type-checking marker
 

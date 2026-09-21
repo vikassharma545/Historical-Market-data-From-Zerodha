@@ -1,6 +1,5 @@
 """Tests for pyzdata._web_helpers — the Streamlit-free half of the web app."""
 
-import io
 from datetime import date
 
 import pandas as pd
@@ -20,7 +19,6 @@ from pyzdata._web_helpers import (
     instrument_options,
     period_to_dates,
     search_contracts,
-    to_excel_bytes,
 )
 from pyzdata.models import Interval
 
@@ -199,11 +197,3 @@ class TestFileStem:
 
     def test_interval_label_is_made_filename_safe(self):
         assert "_1_min_" in file_stem("TCS", _candles(3), "1 min")
-
-
-class TestToExcelBytes:
-    def test_round_trips_through_openpyxl(self):
-        raw = to_excel_bytes(_candles(5))
-        back = pd.read_excel(io.BytesIO(raw))
-        assert len(back) == 5
-        assert list(back.columns) == ["tradingsymbol", "datetime", "close"]

@@ -4,6 +4,7 @@ No browser and no network: the logged-in tests put a fake client into
 session state, exactly where a real login would store it.
 """
 
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -13,6 +14,8 @@ from pyzdata.exceptions import DataFetchError, PartialDataError
 
 pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
+
+from pyzdata._app import _new_job  # noqa: E402
 
 _APP = str(Path(__file__).parent.parent / "pyzdata" / "_app.py")
 
@@ -95,6 +98,7 @@ class TestDownloader:
 
         assert not at.exception
         assert at.subheader[0].value == "RELIANCE · Day"
+        assert any("fetched from Zerodha in" in c.value for c in at.caption)
         assert at.metric[0].value == "3"
         assert client.requests[0]["oi"] is False
 
@@ -148,3 +152,67 @@ class TestDownloader:
 
         assert client.closed
         assert [t.label for t in at.text_input] == ["Enctoken"]
+
+
+class TestDownloadSurvivesReruns:
+    """Streamlit aborts the running script whenever a new click arrives.
+
+    The download therefore runs as a background job owned by the session,
+    and every script run just attaches to it.
+    """
+
+    @staticmethod
+    def _slow_job():
+        def work(report):
+            time.sleep(0.3)
+            report(1, 1)
+            return candles(4)
+
+        return _new_job(work, "RELIANCE", "Day")
+
+    def test_touching_another_control_mid_download_does_not_lose_it(self):
+        client = FakeClient()
+        at = AppTest.from_file(_APP, default_timeout=30)
+        at.session_state["client"] = client
+        at.session_state["job"] = self._slow_job()
+        at.run()  # a rerun that is not a click on Download
+
+        assert not at.exception
+        assert at.subheader[0].value == "RELIANCE · Day"
+        assert at.metric[0].value == "4"
+        assert client.requests == []  # attached to the running job; nothing fetched again
+
+    def test_clicking_download_again_mid_download_does_not_fetch_twice(self):
+        client = FakeClient()
+        at = logged_in(client)
+        at.selectbox(key="symbol_NSE").select("RELIANCE").run()
+        at.session_state["job"] = self._slow_job()
+        button(at, "Download RELIANCE").click().run()
+
+        assert not at.exception
+        assert client.requests == []
+        assert at.metric[0].value == "4"
+
+    def test_download_button_is_disabled_while_downloading(self):
+        def work(report):
+            time.sleep(1.0)
+            return candles(4)
+
+        at = AppTest.from_file(_APP, default_timeout=30)
+        at.session_state["client"] = FakeClient()
+        at.session_state["job"] = _new_job(work, "RELIANCE", "Day")
+        at.run()
+        # after the job finished the page is redrawn with the button usable again
+        assert not any(b.label.startswith("Downloading") for b in at.button)
+
+    def test_an_error_message_survives_the_next_rerun(self):
+        def fail():
+            raise DataFetchError("HTTP 500 fetching RELIANCE")
+
+        at = logged_in(FakeClient(get_data=fail))
+        at.selectbox(key="symbol_NSE").select("RELIANCE").run()
+        button(at, "Download RELIANCE").click().run()
+        assert "Download failed" in at.error[0].value
+        at.run()  # any later interaction
+        assert "Download failed" in at.error[0].value
+

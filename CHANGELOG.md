@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Rewritten web app** — one page instead of a sidebar and three tabs: login form
-  (Enter submits), searchable instrument dropdown, underlying → contract picker for
-  F&O, one-click period and interval, price chart, and **Excel export**
+  (Enter submits), searchable instrument dropdown, word search for F&O contracts
+  (`23000 nifty`, `banknifty fut`), one-click period and interval, price chart,
+  **Excel export**, and a Kite-like theme on a two-column layout
+- **Fast Excel writer** — streams the sheet XML directly (standard library only):
+  460k rows in ~1 s instead of ~25 s with openpyxl
 - **Enctoken validation** — `PyZData(enctoken=...)` checks the token against Kite and
   raises `AuthenticationError` immediately instead of failing mid-download
 - `PyZData.user_name` and `PyZData.instruments` properties
@@ -29,9 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When every request fails, the real error is raised (an expired session says so) instead
   of returning an empty DataFrame
 - Symbol lookup ignores case and extra whitespace; the not-found error suggests close matches
-- `web` extra now requires `streamlit>=1.55` and includes `openpyxl`
+- `web` extra now requires `streamlit>=1.55`
 
 ### Fixed
+- Web app: clicking Download twice fetched everything twice, and touching any other
+  control mid-download silently discarded it. Downloads now run as a background job
+  that page reruns attach to; the button is disabled while one is running
 - README advertised Excel export that did not exist
 - Help text described Kite's per-request limits as the maximum available history
 
