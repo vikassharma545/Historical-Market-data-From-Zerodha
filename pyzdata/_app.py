@@ -29,13 +29,13 @@ from pyzdata._web_helpers import (
     MAIN_INTERVALS,
     PERIODS,
     chart_frame,
-    contract_options,
+    contract_table,
     file_stem,
     friendly_error,
     instrument_options,
     period_to_dates,
+    search_contracts,
     to_excel_bytes,
-    underlyings,
 )
 from pyzdata.downloader import _max_days
 from pyzdata.exceptions import (
@@ -49,6 +49,7 @@ _REPO_URL = "https://github.com/vikassharma545/Historical-Market-data-From-Zerod
 _DEFAULT_PERIOD = "1Y"
 _OTHER = "Other"
 _CUSTOM = "Custom"
+_MAX_MATCHES = 200
 
 _ENCTOKEN_GUIDE = """
 1. Open [kite.zerodha.com](https://kite.zerodha.com) and log in as usual.
@@ -163,31 +164,34 @@ def _pick_instrument(client: PyZData) -> Tuple[str, Optional[str]]:
         )
         return exchange, symbol
 
-    names = _cached(("underlyings", exchange), lambda: underlyings(instruments, exchange))
+    # Thousands of contracts per exchange, and people think "nifty 23000 pe" —
+    # words in any order — which a dropdown's built-in filter can't match.
+    table = _cached(("contracts", exchange), lambda: contract_table(instruments, exchange))
     left, right = st.columns(2)
-    underlying = left.selectbox(
-        "Underlying",
-        names,
-        index=None,
-        placeholder="Type to search — e.g. NIFTY, CRUDEOIL",
-        key=f"underlying_{exchange}",
+    query = left.text_input(
+        "Search contracts",
+        placeholder="e.g. nifty 23000 pe — then press Enter",
+        help="Any words, any order: name, strike, FUT / CE / PE, expiry month. "
+             "Try: banknifty fut · 23000 nifty · crudeoil oct ce",
+        key=f"query_{exchange}",
     )
-    options = (
-        _cached(
-            ("contracts", exchange, underlying),
-            lambda: contract_options(instruments, exchange, underlying),
-        )
-        if underlying
-        else {}
-    )
+    matches = search_contracts(table, query, limit=_MAX_MATCHES)
+    if not query.strip():
+        hint = "Search first"
+    elif not matches:
+        hint = "No match — try fewer words"
+    elif len(matches) == _MAX_MATCHES:
+        hint = f"First {_MAX_MATCHES} matches — add a word to narrow"
+    else:
+        hint = f"{len(matches)} matches — choose one"
     symbol = right.selectbox(
         "Contract",
-        list(options),
+        list(matches),
         index=None,
-        format_func=options.get,
-        placeholder="Choose a contract" if underlying else "Pick an underlying first",
-        disabled=not underlying,
-        key=f"contract_{exchange}_{underlying}",
+        format_func=matches.get,
+        placeholder=hint,
+        disabled=not matches,
+        key=f"contract_{exchange}",
     )
     return exchange, symbol
 
@@ -335,12 +339,13 @@ def _download(
 def _render_result(result: dict) -> None:
     st.divider()
     st.subheader(result["title"])
+    # A caption, not a metric: the date range is too long for a metric column.
+    st.caption(f"{result['first']:%d %b %Y} → {result['last']:%d %b %Y}")
     if result["warning"]:
         st.warning(result["warning"])
 
-    rows, span, close = st.columns([1, 2, 1])
+    rows, close = st.columns(2)
     rows.metric("Rows", f"{result['rows']:,}")
-    span.metric("Period", f"{result['first']:%d %b %Y} → {result['last']:%d %b %Y}")
     close.metric("Last close", f"{result['last_close']:,.2f}")
 
     st.line_chart(result["chart"], height=260)
@@ -385,7 +390,8 @@ much bigger files and take longer to download.
 
 **I can't find my instrument.** Check the exchange first — shares and indices are on
 NSE / BSE, futures & options on NFO / BFO, commodities on MCX / NCO, currency on CDS. Then type
-part of the name in the dropdown. Expired contracts are not available from Zerodha.
+part of the name in the dropdown. For futures & options, search with words in any order —
+`nifty 23000 pe`, `banknifty fut`, `crudeoil oct` — and press Enter. Expired contracts are not available from Zerodha.
 
 **What is open interest?** The number of futures or options contracts still open. It only
 exists for derivatives, so the option appears only on those exchanges.

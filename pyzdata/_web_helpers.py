@@ -39,11 +39,6 @@ POPULAR: Dict[str, List[str]] = {
     "BSE": ["SENSEX", "RELIANCE", "TCS", "HDFCBANK", "INFY"],
 }
 
-_POPULAR_UNDERLYINGS: List[str] = [
-    "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
-    "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "USDINR",
-]
-
 #: Period label → days back from today.  "Custom" is handled by the UI.
 PERIODS: Dict[str, int] = {
     "1W": 7,
@@ -112,33 +107,52 @@ def instrument_options(instruments: pd.DataFrame, exchange: str) -> Dict[str, st
     return {symbol: label(symbol) for symbol in ordered}
 
 
-def underlyings(instruments: pd.DataFrame, exchange: str) -> List[str]:
-    """Underlying names (NIFTY, CRUDEOIL …) on a derivatives exchange."""
-    rows = instruments[instruments["exchange"] == exchange]
-    names = rows["name"].dropna().astype(str).unique().tolist()
-    return _popular_first(names, _POPULAR_UNDERLYINGS)
+def contract_table(instruments: pd.DataFrame, exchange: str) -> pd.DataFrame:
+    """Searchable table of one derivatives exchange — build once, search often.
 
-
-def contract_options(
-    instruments: pd.DataFrame, exchange: str, underlying: str
-) -> Dict[str, str]:
-    """``{tradingsymbol: label}`` for one underlying.
-
-    Futures come first (a handful, and the usual pick), then the options —
-    often well over a thousand — each group by expiry, options by strike.
+    Sorted the way results should appear: futures first (a handful, and the
+    usual pick), then options, each by expiry then strike.  ``_words`` holds
+    every searchable word of a row, space-delimited on both sides:
+    ``" NIFTY NIFTY24JAN23000PE PE 23000 25 JAN 2024 "``.
     """
-    rows = instruments[
-        (instruments["exchange"] == exchange) & (instruments["name"] == underlying)
-    ].copy()
-    rows["_expiry"] = pd.to_datetime(rows["expiry"], errors="coerce")
+    rows = instruments[instruments["exchange"] == exchange].copy()
+    expiry = pd.to_datetime(rows["expiry"], errors="coerce")
+    rows["_expiry"] = expiry
     rows["_is_option"] = rows["instrument_type"] != "FUT"
     rows = rows.sort_values(["_is_option", "_expiry", "strike", "tradingsymbol"])
 
-    options: Dict[str, str] = {}
-    for symbol, kind, expiry in zip(rows["tradingsymbol"], rows["instrument_type"], rows["_expiry"]):
-        when = f" · expires {expiry:%d %b %Y}" if pd.notna(expiry) else ""
-        options[str(symbol)] = f"{symbol} — {kind}{when}"
-    return options
+    when = rows["_expiry"].dt.strftime("%d %b %Y").fillna("")
+    symbol = rows["tradingsymbol"].astype(str)
+    rows["_label"] = (symbol + " · " + when).where(when != "", symbol)
+    rows["_words"] = (
+        " " + rows["name"].fillna("").astype(str)
+        + " " + symbol
+        + " " + rows["instrument_type"].fillna("").astype(str)
+        + " " + rows["strike"].map("{:g}".format)
+        + " " + when + " "
+    ).str.upper()
+    return rows[["tradingsymbol", "_label", "_words"]]
+
+
+def search_contracts(table: pd.DataFrame, query: str, limit: int = 200) -> Dict[str, str]:
+    """``{tradingsymbol: label}`` of contracts matching every word of *query*.
+
+    Word order is free: ``"23000 nifty"`` equals ``"nifty 23000 pe"`` minus
+    the ``pe``.  Text matches the *start* of a word, so ``nifty`` finds NIFTY
+    but not BANKNIFTY, and a pasted symbol finds itself.  Numbers must equal a
+    whole word (strike, day or year) — otherwise ``23000`` would also match
+    digits buried in symbols like ``NIFTY2412523000PE``.
+    """
+    mask = pd.Series(True, index=table.index)
+    words = query.upper().split()
+    for word in words:
+        is_number = word.replace(".", "", 1).isdigit()
+        needle = f" {word} " if is_number else f" {word}"
+        mask &= table["_words"].str.contains(needle, regex=False)
+    if not words:
+        return {}
+    hits = table[mask].head(limit)
+    return dict(zip(hits["tradingsymbol"].astype(str), hits["_label"]))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

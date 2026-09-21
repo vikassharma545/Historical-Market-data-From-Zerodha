@@ -14,13 +14,13 @@ from pyzdata._web_helpers import (
     PERIODS,
     POPULAR,
     chart_frame,
-    contract_options,
+    contract_table,
     file_stem,
     friendly_error,
     instrument_options,
     period_to_dates,
+    search_contracts,
     to_excel_bytes,
-    underlyings,
 )
 from pyzdata.models import Interval
 
@@ -39,6 +39,8 @@ def instruments() -> pd.DataFrame:
         (7, "NIFTY24JANFUT", "NFO", "NIFTY",               "2024-01-25", 0.0,   "FUT"),
         (8, "NIFTY24JAN21500CE", "NFO", "NIFTY",           "2024-01-25", 21500, "CE"),
         (9, "ACC24JANFUT",   "NFO", "ACC",                 "2024-01-25", 0.0,   "FUT"),
+        (11, "NIFTY2412523000PE", "NFO", "NIFTY",          "2024-01-25", 23000, "PE"),
+        (12, "BANKNIFTY24JAN23000CE", "NFO", "BANKNIFTY",  "2024-01-31", 23000, "CE"),
     ]
     return pd.DataFrame(rows, columns=[
         "instrument_token", "tradingsymbol", "exchange", "name",
@@ -105,18 +107,42 @@ class TestInstrumentOptions:
         assert options["ABB"] == "ABB"
 
 
-class TestDerivativePickers:
-    def test_underlyings_popular_first(self, instruments):
-        assert underlyings(instruments, "NFO") == ["NIFTY", "ACC"]
+class TestSearchContracts:
+    @pytest.fixture
+    def table(self, instruments):
+        return contract_table(instruments, "NFO")
 
-    def test_futures_first_then_options_each_by_expiry(self, instruments):
-        assert list(contract_options(instruments, "NFO", "NIFTY")) == [
-            "NIFTY24JANFUT", "NIFTY24FEBFUT", "NIFTY24JAN21500CE",
+    def test_words_match_in_any_order(self, table):
+        assert list(search_contracts(table, "23000 nifty")) == ["NIFTY2412523000PE"]
+        assert list(search_contracts(table, "nifty 23000")) == ["NIFTY2412523000PE"]
+
+    def test_name_matches_from_the_start_so_nifty_excludes_banknifty(self, table):
+        assert "BANKNIFTY24JAN23000CE" not in search_contracts(table, "nifty")
+        assert list(search_contracts(table, "bank 23000")) == ["BANKNIFTY24JAN23000CE"]
+
+    def test_numbers_match_the_whole_strike_not_digits_inside_the_symbol(self, table):
+        # "12523" appears inside NIFTY2412523000PE but is not a strike.
+        assert search_contracts(table, "12523") == {}
+        assert search_contracts(table, "2300") == {}
+
+    def test_futures_first_then_options_by_expiry(self, table):
+        assert list(search_contracts(table, "nifty")) == [
+            "NIFTY24JANFUT", "NIFTY24FEBFUT", "NIFTY24JAN21500CE", "NIFTY2412523000PE",
         ]
 
-    def test_contract_label_shows_type_and_expiry(self, instruments):
-        label = contract_options(instruments, "NFO", "NIFTY")["NIFTY24JANFUT"]
-        assert "FUT" in label and "25 Jan 2024" in label
+    def test_type_month_and_year_are_searchable(self, table):
+        assert list(search_contracts(table, "nifty fut feb")) == ["NIFTY24FEBFUT"]
+        assert list(search_contracts(table, "pe 2024")) == ["NIFTY2412523000PE"]
+
+    def test_a_pasted_symbol_matches(self, table):
+        assert list(search_contracts(table, "nifty24janfut")) == ["NIFTY24JANFUT"]
+
+    def test_label_shows_symbol_and_expiry(self, table):
+        assert search_contracts(table, "nifty24janfut")["NIFTY24JANFUT"] == "NIFTY24JANFUT · 25 Jan 2024"
+
+    def test_empty_query_and_limit(self, table):
+        assert search_contracts(table, "   ") == {}
+        assert len(search_contracts(table, "nifty", limit=2)) == 2
 
 
 # ── friendly_error ──────────────────────────────────────────────────────────

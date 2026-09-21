@@ -98,12 +98,12 @@ class TestDownloader:
         assert at.metric[0].value == "3"
         assert client.requests[0]["oi"] is False
 
-    def test_derivatives_use_two_step_picker_and_open_interest(self):
+    def test_derivatives_use_word_search_and_open_interest(self):
         client = FakeClient()
         at = logged_in(client)
         at.button_group(key="exchange").select("NFO").run()
-        at.selectbox(key="underlying_NFO").select("NIFTY").run()
-        at.selectbox(key="contract_NFO_NIFTY").select("NIFTY24JANFUT").run()
+        at.text_input(key="query_NFO").input("fut nifty").run()
+        at.selectbox(key="contract_NFO").select("NIFTY24JANFUT").run()
         button(at, "Download NIFTY24JANFUT").click().run()
 
         assert not at.exception
