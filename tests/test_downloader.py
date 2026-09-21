@@ -10,11 +10,12 @@ import requests
 from pyzdata.downloader import (
     DataDownloader,
     _clean,
+    _date_windows,
     _expected_cols,
-    _month_windows,
+    _max_days,
     _parse_datetime,
 )
-from pyzdata.exceptions import DataFetchError
+from pyzdata.exceptions import DataFetchError, PartialDataError
 from pyzdata.models import Interval
 
 # ---------------------------------------------------------------------------
@@ -56,46 +57,54 @@ def downloader(mock_session, config, instruments_stub):
 
 
 # ---------------------------------------------------------------------------
-# _month_windows (pure helper)
+# _date_windows / _max_days (pure helpers)
 # ---------------------------------------------------------------------------
 
-class TestMonthWindows:
+class TestDateWindows:
 
     def test_single_day(self):
-        windows = list(_month_windows(pd.Timestamp("2024-01-15"), pd.Timestamp("2024-01-15")))
-        assert len(windows) == 1
-        assert windows[0][0].date() == date(2024, 1, 15)
-        assert windows[0][1].date() == date(2024, 1, 15)
+        windows = list(_date_windows(pd.Timestamp("2024-01-15"), pd.Timestamp("2024-01-15"), 60))
+        assert [(s.date(), e.date()) for s, e in windows] == [
+            (date(2024, 1, 15), date(2024, 1, 15))
+        ]
 
-    def test_single_month_mid_range(self):
-        windows = list(_month_windows(pd.Timestamp("2024-01-10"), pd.Timestamp("2024-01-20")))
-        assert len(windows) == 1
-        start, end = windows[0]
-        assert start.date() == date(2024, 1, 10)
-        assert end.date()   == date(2024, 1, 20)
-
-    def test_two_months(self):
-        windows = list(_month_windows(pd.Timestamp("2024-01-15"), pd.Timestamp("2024-02-10")))
-        assert len(windows) == 2
-        assert windows[0][0].date() == date(2024, 1, 15)
-        assert windows[0][1].date() == date(2024, 1, 31)
-        assert windows[1][0].date() == date(2024, 2,  1)
-        assert windows[1][1].date() == date(2024, 2, 10)
-
-    def test_full_year_produces_12_windows(self):
-        windows = list(_month_windows(pd.Timestamp("2024-01-01"), pd.Timestamp("2024-12-31")))
-        assert len(windows) == 12
-
-    def test_feb_leap_year(self):
-        windows = list(_month_windows(pd.Timestamp("2024-02-01"), pd.Timestamp("2024-02-29")))
+    def test_range_within_limit_is_one_window(self):
+        windows = list(_date_windows(pd.Timestamp("2024-01-01"), pd.Timestamp("2024-02-29"), 60))
         assert len(windows) == 1
         assert windows[0][1].date() == date(2024, 2, 29)
 
-    def test_cross_year_boundary(self):
-        windows = list(_month_windows(pd.Timestamp("2023-12-15"), pd.Timestamp("2024-01-10")))
-        assert len(windows) == 2
-        assert windows[0][0].year == 2023
-        assert windows[1][0].year == 2024
+    def test_range_is_split_without_gaps_or_overlap(self):
+        windows = list(_date_windows(pd.Timestamp("2024-01-01"), pd.Timestamp("2024-05-31"), 60))
+        assert [(s.date(), e.date()) for s, e in windows] == [
+            (date(2024, 1, 1),  date(2024, 2, 29)),
+            (date(2024, 3, 1),  date(2024, 4, 29)),
+            (date(2024, 4, 30), date(2024, 5, 31)),
+        ]
+
+    def test_no_window_exceeds_max_days(self):
+        windows = _date_windows(pd.Timestamp("2015-01-01"), pd.Timestamp("2024-12-31"), 100)
+        assert all((e - s).days + 1 <= 100 for s, e in windows)
+
+
+class TestMaxDays:
+
+    @pytest.mark.parametrize("interval, expected", [
+        (Interval.MINUTE_1, 60),
+        (Interval.MINUTE_3, 60),
+        (Interval.MINUTE_5, 100),
+        (Interval.MINUTE_10, 100),
+        (Interval.MINUTE_15, 200),
+        (Interval.MINUTE_30, 200),
+        (Interval.HOUR_1, 400),
+        (Interval.HOUR_4, 400),
+        (Interval.DAY, 2000),
+    ])
+    def test_limits(self, interval, expected):
+        assert _max_days(interval) == expected
+
+    def test_every_interval_has_a_limit(self):
+        for interval in Interval:
+            assert _max_days(interval) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +239,83 @@ class TestFetch:
         mock_session.get.side_effect = requests.ConnectionError("unreachable")
         with pytest.raises(DataFetchError, match="Network error"):
             downloader.fetch(408065, "2024-01-02", "2024-01-02", Interval.DAY)
+
+
+# ---------------------------------------------------------------------------
+# DataDownloader.fetch — multi-window behaviour
+# ---------------------------------------------------------------------------
+
+def _daily_candle(day: str) -> list:
+    return [f"{day}T09:15:00+0530", 100.0, 101.0, 99.0, 100.5, 1000]
+
+
+class TestFetchMultiWindow:
+    """2024-01-01 → 2024-05-31 at 1-minute = three 60-day windows."""
+
+    _ARGS = (408065, "2024-01-01", "2024-05-31", Interval.MINUTE_1)
+    _GOOD = {
+        "2024-01-01": _daily_candle("2024-01-02"),
+        "2024-03-01": _daily_candle("2024-03-04"),
+        "2024-04-30": _daily_candle("2024-05-02"),
+    }
+
+    def _serve(self, mock_session, failures: dict):
+        """*failures* maps a window's start date → number of times it fails."""
+        remaining = dict(failures)
+
+        def _get(url, params, **kwargs):
+            start = params["from"][:10]
+            if remaining.get(start, 0) > 0:
+                remaining[start] -= 1
+                return _http_error_resp(500)
+            return _api_resp([self._GOOD[start]])
+
+        mock_session.get.side_effect = _get
+
+    def test_daily_five_years_is_one_request(self, downloader, mock_session):
+        mock_session.get.return_value = _api_resp([_daily_candle("2024-01-02")])
+        downloader.fetch(408065, "2020-01-01", "2024-12-31", Interval.DAY)
+        assert mock_session.get.call_count == 1
+
+    def test_all_windows_succeed(self, downloader, mock_session):
+        self._serve(mock_session, {})
+        df = downloader.fetch(*self._ARGS)
+        assert len(df) == 3
+        assert mock_session.get.call_count == 3
+
+    def test_failed_window_is_retried_once(self, downloader, mock_session):
+        self._serve(mock_session, {"2024-03-01": 1})
+        df = downloader.fetch(*self._ARGS)
+        assert len(df) == 3
+
+    def test_persistent_failure_raises_partial_data_error(self, downloader, mock_session):
+        self._serve(mock_session, {"2024-03-01": 2})
+        with pytest.raises(PartialDataError) as exc_info:
+            downloader.fetch(*self._ARGS)
+        err = exc_info.value
+        assert err.failed_ranges == [(date(2024, 3, 1), date(2024, 4, 29))]
+        assert len(err.partial_data) == 2
+        assert "2024-03-01" in str(err)
+
+    def test_partial_data_error_is_a_data_fetch_error(self):
+        assert issubclass(PartialDataError, DataFetchError)
+
+    def test_all_windows_failing_raises_plain_error(self, downloader, mock_session):
+        mock_session.get.return_value = _http_error_resp(500)
+        with pytest.raises(DataFetchError, match="HTTP 500") as exc_info:
+            downloader.fetch(*self._ARGS)
+        assert not isinstance(exc_info.value, PartialDataError)
+
+    def test_http_403_mentions_expired_session(self, downloader, mock_session):
+        mock_session.get.return_value = _http_error_resp(403)
+        with pytest.raises(DataFetchError, match="expired"):
+            downloader.fetch(*self._ARGS)
+
+    def test_progress_reports_every_window(self, downloader, mock_session):
+        self._serve(mock_session, {})
+        calls = []
+        downloader.fetch(*self._ARGS, progress_callback=lambda done, total: calls.append((done, total)))
+        assert calls == [(1, 3), (2, 3), (3, 3)]
 
 
 # ---------------------------------------------------------------------------

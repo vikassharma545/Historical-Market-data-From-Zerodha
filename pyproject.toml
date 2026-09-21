@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyzdata"
-version = "1.0.6"
+version = "1.1.0"
 description = "Indian Historical Market Data Downloader from Zerodha"
 readme = "README.md"
 license = "MIT"
@@ -33,12 +33,14 @@ dependencies = [
 [project.optional-dependencies]
 # Web interface: pip install "pyzdata[web]"
 web = [
-    "streamlit>=1.50.0",
+    "streamlit>=1.55.0",
 ]
 # Development / testing: pip install "pyzdata[dev]"
 dev = [
     "pytest>=7.0",
     "pytest-mock>=3.10",
+    "ruff>=0.4",
+    "openpyxl>=3.1.0",  # tests read our .xlsx files back with it
 ]
 
 [project.urls]

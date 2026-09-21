@@ -17,6 +17,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Kite-like look: white page, grey text, blue accent, sharp corners.
+# Passed as flags because an installed package has no .streamlit/config.toml.
+# Keep in sync with .streamlit/config.toml (used by `streamlit run app.py`).
+_THEME = {
+    "base": "light",
+    "primaryColor": "#387ed1",
+    "backgroundColor": "#ffffff",
+    "secondaryBackgroundColor": "#f6f7f9",
+    "textColor": "#444444",
+    "linkColor": "#387ed1",
+    "borderColor": "#e0e0e0",
+    "baseRadius": "4px",
+}
+
 
 def main() -> None:
     # Check streamlit is available before trying to launch
@@ -34,7 +48,12 @@ def main() -> None:
 
     try:
         subprocess.run(
-            [sys.executable, "-m", "streamlit", "run", str(app_file)],
+            [
+                sys.executable, "-m", "streamlit", "run", str(app_file),
+                # Hide Streamlit's developer menu — this is an end-user app.
+                "--client.toolbarMode", "minimal",
+                *(f"--theme.{name}={value}" for name, value in _THEME.items()),
+            ],
             check=True,
         )
     except KeyboardInterrupt:

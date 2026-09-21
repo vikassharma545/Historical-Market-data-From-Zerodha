@@ -1,807 +1,510 @@
-"""PyZData Web Interface — designed for every user, not just developers.
+"""PyZData web interface — one page: log in, pick, download.
 
 Run with:
-    streamlit run app.py
+    pyzdata-web            (installed)
+    streamlit run app.py   (from a checkout)
+
+Only Streamlit calls live here.  Tables and pure logic are in
+:mod:`pyzdata._web_helpers` so they can be tested without a browser.
 """
 
 from __future__ import annotations
 
 import io
+import math
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import date, timedelta
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
 
 from pyzdata import Config, Interval, PyZData, __version__
+from pyzdata._web_helpers import (
+    DERIVATIVE_EXCHANGES,
+    EXCHANGE_HELP,
+    EXCHANGES,
+    INTERVALS,
+    MAIN_INTERVALS,
+    PERIODS,
+    chart_frame,
+    contract_table,
+    file_stem,
+    friendly_error,
+    instrument_options,
+    period_to_dates,
+    search_contracts,
+)
+from pyzdata._xlsx import EXCEL_MAX_ROWS, to_excel_bytes
+from pyzdata.downloader import _max_days
 from pyzdata.exceptions import (
     AuthenticationError,
     DataFetchError,
-    InstrumentNotFoundError,
+    PartialDataError,
     PyZDataError,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Data tables  (no external API calls needed)
-# ─────────────────────────────────────────────────────────────────────────────
+_REPO_URL = "https://github.com/vikassharma545/Historical-Market-data-From-Zerodha"
+_DEFAULT_PERIOD = "1Y"
+_OTHER = "Other"
+_CUSTOM = "Custom"
+_MAX_MATCHES = 200
+_TITLE = ":orange[:material/candlestick_chart:] PyZData"
+_CHART_COLOR = "#387ed1"
 
-# (symbol, exchange, friendly label, emoji)
-POPULAR_STOCKS: List[Tuple[str, str, str, str]] = [
-    ("NIFTY 50",    "NSE", "NIFTY 50",       "📈"),
-    ("NIFTY BANK",  "NSE", "BANK NIFTY",     "🏦"),
-    ("RELIANCE",    "NSE", "Reliance",        "⚡"),
-    ("TCS",         "NSE", "TCS",             "💻"),
-    ("HDFCBANK",    "NSE", "HDFC Bank",       "🏛️"),
-    ("INFY",        "NSE", "Infosys",         "🖥️"),
-    ("ICICIBANK",   "NSE", "ICICI Bank",      "🏧"),
-    ("SBIN",        "NSE", "SBI",             "🏦"),
-    ("ITC",         "NSE", "ITC",             "🌿"),
-    ("WIPRO",       "NSE", "Wipro",           "💡"),
-    ("BAJFINANCE",  "NSE", "Bajaj Finance",   "💳"),
-    ("TATAMOTORS",  "NSE", "Tata Motors",     "🚗"),
-    ("HINDUNILVR",  "NSE", "HUL",             "🧴"),
-    ("AXISBANK",    "NSE", "Axis Bank",       "💰"),
-    ("MARUTI",      "NSE", "Maruti Suzuki",   "🚙"),
-    ("ONGC",        "NSE", "ONGC",            "🛢️"),
-    ("SENSEX",      "BSE", "SENSEX",          "📊"),
-]
+# The only CSS in the app.  If Streamlit renames the test id the page merely
+# becomes full-width again — nothing breaks.
+_CSS = """
+<style>
+.stApp { border-top: 3px solid #ff5722; }
+[data-testid="stMainBlockContainer"] { max-width: 1200px; padding-top: 2.5rem; }
+</style>
+"""
 
-# Human-readable label → (Interval, description)
-FREQUENCY_OPTIONS: Dict[str, Tuple[Interval, str]] = {
-    "📅  Daily  (recommended for beginners)": (
-        Interval.DAY,
-        "One data point per trading day. Best for understanding long-term price trends.",
-    ),
-    "⏰  Hourly": (
-        Interval.HOUR_1,
-        "One data point per hour. Good for weekly or monthly analysis.",
-    ),
-    "🕐  Every 30 Minutes": (
-        Interval.MINUTE_30,
-        "Half-hourly candles. Suitable for short-term swing trading.",
-    ),
-    "⚡  Every 15 Minutes": (
-        Interval.MINUTE_15,
-        "Commonly used for intraday trading charts.",
-    ),
-    "🔬  Every 5 Minutes": (
-        Interval.MINUTE_5,
-        "High-detail intraday data. File size gets large over long periods.",
-    ),
-    "🧬  Every Minute": (
-        Interval.MINUTE_1,
-        "Most detailed data available. Only use for short date ranges.",
-    ),
-}
+_ENCTOKEN_GUIDE = """
+1. Open [kite.zerodha.com](https://kite.zerodha.com) and log in as usual.
+2. Press **F12** (Mac: **Cmd + Option + I**) to open Developer Tools.
+3. Open the **Application** tab (Firefox: **Storage**) → **Cookies** → `kite.zerodha.com`.
+4. Copy the value of the cookie named **`enctoken`** and paste it here.
 
-# Label → days offset from today
-DATE_PRESETS: dict[str, int] = {
-    "Last 1 Week":   7,
-    "Last 1 Month":  30,
-    "Last 3 Months": 90,
-    "Last 6 Months": 180,
-    "Last 1 Year":   365,
-    "Last 3 Years":  1095,
-    "Last 5 Years":  1825,
-}
-
-EXCHANGES = ["NSE", "BSE", "NFO", "MCX", "CDS", "BFO"]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Session-state helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _ss(key: str, default=None):
-    """Read from session_state with a default."""
-    return st.session_state.get(key, default)
-
-
-def is_logged_in() -> bool:
-    return st.session_state.get("client") is not None
-
-
-def get_client() -> PyZData | None:
-    return st.session_state.get("client")
-
-
-def _set_stock(symbol: str, exchange: str) -> None:
-    # Write to staging keys — the real "sym"/"exch" keys are owned by already-
-    # rendered widgets in this run and cannot be mutated after instantiation.
-    # On the next rerun, render_download_tab() moves these into "sym"/"exch"
-    # BEFORE the widgets are created, so Streamlit accepts the update.
-    st.session_state["_sym_next"]  = symbol
-    st.session_state["_exch_next"] = exchange
-
-
-def _set_dates(days: int) -> None:
-    st.session_state["end_date"]   = date.today()
-    st.session_state["start_date"] = date.today() - timedelta(days=days)
+The enctoken changes every time you log in to Kite. If it stops working, copy a fresh one.
+"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sidebar
+# Login
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_sidebar() -> None:
-    st.sidebar.markdown("# 📊 PyZData")
-    st.sidebar.caption(f"v{__version__} • Free • Open source • No Subscription needed")
-    st.sidebar.divider()
-
-    if is_logged_in():
-        st.sidebar.success("You are logged in ✅")
-        if st.sidebar.button("🚪  Log out", width="stretch"):
-            for k in ["client", "last_csv", "last_meta", "sym", "exch"]:
-                st.session_state.pop(k, None)
-            st.rerun()
-        st.sidebar.divider()
-        st.sidebar.info(
-            "Your session is active. Data will download as long as this "
-            "browser tab is open."
-        )
-        return
-
-    # ── Not logged in ──
-    st.sidebar.subheader("🔑  Step 1: Log in to Zerodha")
-
-    auth_tab = st.sidebar.radio(
-        "Choose login method",
-        ["Paste Enctoken", "Enter username & password"],
-        index=0,
-        help="Both methods are equally secure.",
-    )
-
-    if auth_tab == "Paste Enctoken":
-        _sidebar_enctoken_form()
-    else:
-        _sidebar_credential_form()
-
-    st.sidebar.divider()
-
-    with st.sidebar.expander("❓  How do I get my enctoken?"):
-        st.markdown("""
-**Step-by-step (takes 2 minutes):**
-
-1. Open [kite.zerodha.com](https://kite.zerodha.com) and **log in** with your Zerodha ID.
-2. Press **F12** on your keyboard to open Developer Tools.
-3. Click the **"Application"** tab at the top (Chrome) or **"Storage"** tab (Firefox).
-4. On the left panel, expand **Cookies** → click **kite.zerodha.com**.
-5. In the table, find the row named **`enctoken`**.
-6. Click on it and **copy the long value** in the bottom panel.
-7. Paste it in the box above and click Login.
-
-> **Note:** Your enctoken changes each time you log in to Kite. If login stops working, repeat these steps.
-""")
-
-    with st.sidebar.expander("🔒  Is this safe?"):
-        st.markdown("""
-- Your credentials are sent **directly to Zerodha's servers** — not stored anywhere else.
-- This app runs **entirely in your browser** and on your own computer.
-- The source code is **open source** — anyone can inspect it.
-- We never save your password or enctoken to a file.
-""")
-
-
-def _sidebar_enctoken_form() -> None:
-    enctoken = st.sidebar.text_input(
-        "Your enctoken",
-        type="password",
-        placeholder="Paste the long token here …",
-    )
-    if st.sidebar.button("Login →", type="primary", width="stretch"):
-        if not enctoken.strip():
-            st.sidebar.error("Please paste your enctoken first.")
-            return
-        _do_login(enctoken=enctoken.strip())
-
-
-def _sidebar_credential_form() -> None:
-    user_id  = st.sidebar.text_input("Zerodha User ID", placeholder="e.g. AB1234")
-    password = st.sidebar.text_input("Password", type="password")
-    totp     = st.sidebar.text_input(
-        "TOTP (6-digit code)",
-        placeholder="From your authenticator app",
-        max_chars=6,
-        help="Open your Google Authenticator / Zerodha Authenticator app for this code.",
-    )
-    if st.sidebar.button("Login →", type="primary", width="stretch"):
-        missing = [n for n, v in [("User ID", user_id), ("Password", password), ("TOTP", totp)] if not v.strip()]
-        if missing:
-            st.sidebar.error(f"Please fill in: {', '.join(missing)}")
-            return
-        _do_login(user_id=user_id.strip(), password=password.strip(), totp=totp.strip())
-
-
-def _do_login(**kwargs) -> None:
-    with st.sidebar:
-        with st.spinner("Connecting to Zerodha …"):
-            try:
-                client = PyZData(config=Config(log_level="ERROR"), **kwargs)
-                st.session_state["client"] = client
-                st.rerun()
-            except AuthenticationError as exc:
-                st.error(f"Login failed — {_friendly_auth_error(str(exc))}")
-            except PyZDataError as exc:
-                st.error(f"Something went wrong: {exc}")
-
-
-def _friendly_auth_error(msg: str) -> str:
-    msg_lower = msg.lower()
-    if "403" in msg_lower or "password" in msg_lower:
-        return "Wrong User ID or password. Please check and try again."
-    if "totp" in msg_lower or "2fa" in msg_lower or "twofa" in msg_lower:
-        return "Wrong TOTP code. Open your authenticator app and use the latest 6-digit code."
-    if "enctoken" in msg_lower:
-        return "Invalid or expired enctoken. Please get a fresh one from Kite (see the guide below)."
-    if "network" in msg_lower or "connect" in msg_lower:
-        return "Network error. Check your internet connection and try again."
-    return msg
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Welcome screen  (shown before login)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def render_welcome() -> None:
-    st.markdown("""
-## 👋  Welcome to PyZData
-### The easiest way to download Indian stock market data
-""")
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("""
-<div class="info-card">
-<b>📥  Download any stock</b><br><br>
-Get historical price data for stocks, indices, F&amp;O, and commodities traded on Zerodha.
-</div>
-""", unsafe_allow_html=True)
-    with c2:
-        st.markdown("""
-<div class="info-card">
-<b>📊  Any time period</b><br><br>
-Choose from last week all the way to 5 years of data, or pick custom dates.
-</div>
-""", unsafe_allow_html=True)
-    with c3:
-        st.markdown("""
-<div class="info-card">
-<b>💾  Save as Excel or CSV</b><br><br>
-Download your data instantly as a spreadsheet. Ready for Excel, Google Sheets, or Python.
-</div>
-""", unsafe_allow_html=True)
-
-    st.divider()
-
-    st.markdown("### How to get started")
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        st.markdown("**Step 1 — Log in** (sidebar ←)**\n\nPaste your Zerodha enctoken OR enter your username, password, and TOTP.")
-    with s2:
-        st.markdown("**Step 2 — Pick a stock**\n\nChoose from popular stocks or type any symbol traded on Zerodha.")
-    with s3:
-        st.markdown("**Step 3 — Download**\n\nSelect a date range and click Download. Save to your computer with one click.")
-
-    st.divider()
-    st.info("👈  **Get started by logging in using the left sidebar.**")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Tab 1 — Download Data
-# ─────────────────────────────────────────────────────────────────────────────
-
-def render_download_tab() -> None:
-    if not is_logged_in():
-        render_welcome()
-        return
-
-    # Apply any pending stock selection from chip buttons.  Must happen BEFORE
-    # the text_input / selectbox widgets are instantiated, otherwise Streamlit
-    # raises "cannot be modified after the widget … is instantiated".
-    if "_sym_next" in st.session_state:
-        st.session_state["sym"]  = st.session_state.pop("_sym_next")
-    if "_exch_next" in st.session_state:
-        st.session_state["exch"] = st.session_state.pop("_exch_next")
-
-    client = get_client()
-
-    # ── Step 1: Pick a stock ──────────────────────────────────────────────
-    st.markdown('<p class="step-header">Step 1 &nbsp;—&nbsp; Which stock do you want data for?</p>', unsafe_allow_html=True)
-
-    sym_col, exch_col = st.columns([3, 1])
-    with sym_col:
-        symbol = st.text_input(
-            "Type a stock or index name",
-            key="sym",
-            placeholder="e.g.  NIFTY 50,  RELIANCE,  HDFCBANK,  TCS …",
-            label_visibility="collapsed",
-            help="Enter the exact trading symbol. If unsure, use the 🔍 Search tab.",
+def render_login() -> None:
+    _, middle, _ = st.columns([1, 2, 1])
+    with middle:
+        st.title(_TITLE)
+        st.markdown(
+            "Download historical prices for any stock, index, future or option on "
+            "Zerodha — as CSV or Excel. Free, no API subscription."
         )
 
-    with exch_col:
-        exchange = st.selectbox(
-            "Exchange",
-            EXCHANGES,
-            key="exch",
-            label_visibility="collapsed",
-            help="NSE = National Stock Exchange (most stocks). NFO = Futures & Options.",
-        )
+        method = st.segmented_control(
+            "Log in with",
+            ["Enctoken", "User ID & password"],
+            default="Enctoken",
+            key="login_method",
+        ) or "Enctoken"
 
-    # Popular stock shortcuts
-    st.caption("Or click a popular one:")
-    COLS_PER_ROW = 8
-    rows = [POPULAR_STOCKS[i:i+COLS_PER_ROW] for i in range(0, len(POPULAR_STOCKS), COLS_PER_ROW)]
-    for row in rows:
-        cols = st.columns(len(row))
-        for col, (sym, exch, label, emoji) in zip(cols, row):
-            if col.button(f"{emoji}  {label}", key=f"chip_{sym}", width="stretch"):
-                _set_stock(sym, exch)
-                st.rerun()
+        # A form, so pressing Enter submits and typing doesn't rerun the page.
+        with st.form("login"):
+            if method == "Enctoken":
+                credentials = {
+                    "enctoken": st.text_input(
+                        "Enctoken", type="password", placeholder="Paste your enctoken",
+                    ),
+                }
+            else:
+                credentials = {
+                    "user_id": st.text_input("Zerodha user ID", placeholder="AB1234"),
+                    "password": st.text_input("Password", type="password"),
+                    "totp": st.text_input(
+                        "TOTP code", max_chars=6, placeholder="6 digits from your authenticator app",
+                    ),
+                }
+            submitted = st.form_submit_button("Log in", type="primary", width="stretch")
 
-    st.divider()
+        if submitted:
+            credentials = {name: value.strip() for name, value in credentials.items()}
+            if all(credentials.values()):
+                _log_in(credentials)
+            else:
+                st.error("Please fill in every field.")
 
-    # ── Step 2: Pick a date range ─────────────────────────────────────────
-    st.markdown('<p class="step-header">Step 2 &nbsp;—&nbsp; How far back do you want data?</p>', unsafe_allow_html=True)
-
-    # Preset quick buttons
-    preset_cols = st.columns(len(DATE_PRESETS))
-    for col, (label, days) in zip(preset_cols, DATE_PRESETS.items()):
-        if col.button(label, key=f"preset_{days}", width="stretch"):
-            _set_dates(days)
-            st.rerun()
-
-    # Actual date pickers (auto-filled by presets or manually chosen)
-    d1, d2 = st.columns(2)
-    with d1:
-        start_date = st.date_input(
-            "From date",
-            key="start_date",
-            max_value=date.today(),
-        )
-    with d2:
-        end_date = st.date_input(
-            "To date",
-            key="end_date",
-            max_value=date.today(),
-        )
-
-    if start_date > end_date:
-        st.error("The start date can't be after the end date. Please fix the dates.")
-        return
-
-    st.divider()
-
-    # ── Step 3: Pick data frequency ───────────────────────────────────────
-    st.markdown('<p class="step-header">Step 3 &nbsp;—&nbsp; How often should the data be recorded?</p>', unsafe_allow_html=True)
-
-    freq_label = st.radio(
-        "Data frequency",
-        list(FREQUENCY_OPTIONS.keys()),
-        index=0,
-        label_visibility="collapsed",
-    )
-    interval, freq_desc = FREQUENCY_OPTIONS[freq_label]
-    st.caption(f"ℹ️  {freq_desc}")
-
-    # ── Advanced options (collapsed) ─────────────────────────────────────
-    with st.expander("⚙️  Advanced options"):
-        oi = st.checkbox(
-            "Include Open Interest (OI)",
-            value=False,
-            help="Only useful for F&O instruments (NFO / MCX). Adds an extra column.",
-        )
-        custom_exchange = st.selectbox(
-            "Override exchange",
-            ["Use selection above"] + EXCHANGES,
-            help="Change this only if your instrument is on a different exchange.",
-        )
-        if custom_exchange != "Use selection above":
-            exchange = custom_exchange
-
-    st.divider()
-
-    # ── Download button ───────────────────────────────────────────────────
-    current_sym = symbol.strip()
-
-    if not current_sym:
-        st.info("👆  Pick a stock above, then click Download.")
-        return
-
-    # Summary of what will be downloaded
-    months = max(1, (end_date.year - start_date.year)*12 + (end_date.month - start_date.month) + 1)
-    st.markdown(
-        f"**Ready to download:** &nbsp; `{current_sym}` on `{exchange}` "
-        f"&nbsp;|&nbsp; {start_date} → {end_date} "
-        f"&nbsp;|&nbsp; {freq_label.split('  ')[1].split('(')[0].strip()} "
-        f"&nbsp;|&nbsp; ~{months} month(s)"
-    )
-
-    if st.button("🚀  Download Data", type="primary", width="stretch"):
-        _execute_download(client, current_sym, exchange, start_date, end_date, interval, oi)
-
-    # ── Show last result ──────────────────────────────────────────────────
-    if _ss("last_csv") is not None:
-        _render_results()
-
-
-def _execute_download(
-    client:     PyZData,
-    symbol:     str,
-    exchange:   str,
-    start_date: date,
-    end_date:   date,
-    interval:   Interval,
-    oi:         bool,
-) -> None:
-    # Resolve token
-    with st.spinner(f"Looking up {symbol} on {exchange} …"):
-        try:
-            token = client.get_instrument_token(symbol, exchange)
-        except InstrumentNotFoundError:
-            st.error(
-                f"**{symbol}** was not found on **{exchange}**. "
-                "Common fixes:\n"
-                "- Check the spelling (symbols are case-sensitive)\n"
-                "- Use the **🔍 Search** tab to find the exact symbol name\n"
-                "- Try a different exchange (e.g. NSE vs BSE)"
+        with st.expander("How do I get my enctoken?"):
+            st.markdown(_ENCTOKEN_GUIDE)
+        with st.expander("Is this safe?"):
+            st.markdown(
+                "- Your login details go **only to Zerodha's servers**, straight from this computer.\n"
+                "- Nothing is written to disk — the session ends when you close this tab.\n"
+                f"- The code is open source: [read it on GitHub]({_REPO_URL})."
             )
-            return
-        except PyZDataError as exc:
-            st.error(f"Error: {exc}")
-            return
 
-    # Fetch data with progress bar
-    progress_bar = st.progress(0, text=f"Downloading **{symbol}** …")
 
-    def _on_progress(completed: int, total: int) -> None:
-        pct = completed / total if total else 1
-        progress_bar.progress(pct, text=f"Downloading **{symbol}** … ({completed}/{total} months)")
-
+def _log_in(credentials: Dict[str, str]) -> None:
     try:
-        df = client.get_data(
-            token, str(start_date), str(end_date), interval,
-            oi=oi, progress_callback=_on_progress,
-        )
-    except DataFetchError as exc:
-        progress_bar.empty()
-        st.error(
-            f"Download failed: {exc}\n\n"
-            "This can happen when:\n"
-            "- Your session has expired — try logging out and back in\n"
-            "- Zerodha's servers are temporarily busy — wait a moment and retry\n"
-            "- The date range is too large for the selected interval"
-        )
-        return
+        with st.spinner("Connecting to Zerodha …"):
+            client = PyZData(config=Config.from_env(), **credentials)
+    except AuthenticationError as exc:
+        st.error(friendly_error(str(exc)))
     except PyZDataError as exc:
-        progress_bar.empty()
-        st.error(f"Unexpected error: {exc}")
-        return
-
-    progress_bar.progress(1.0, text="Download complete!")
-
-    if df.empty:
-        st.warning(
-            f"No data was returned for **{symbol}** between {start_date} and {end_date}.\n\n"
-            "Possible reasons:\n"
-            "- This instrument doesn't trade on the selected dates (holiday, delisted, or not yet listed)\n"
-            "- Try a shorter date range or a different interval"
-        )
-        return
-
-    # Convert once here — don't store the raw DataFrame in session state.
-    # Streamlit re-serialises session state on every rerun, and a 460k-row
-    # DataFrame makes that extremely slow.
-    progress_bar.progress(1.0, text="Preparing download …")
-
-    st.session_state["last_csv"] = df.to_csv(index=False).encode("utf-8")
-    st.session_state["last_meta"] = {
-        "symbol": symbol,
-        "rows":   len(df),
-        "fname":  f"{symbol.replace(' ', '_')}_{df['datetime'].min().date()}_{df['datetime'].max().date()}",
-    }
-    progress_bar.empty()
-    st.balloons()
-    st.rerun()
-
-
-def _render_results() -> None:
-    meta = _ss("last_meta", {})
-    symbol = meta.get("symbol", "Data")
-    total_rows = meta.get("rows", 0)
-    fname_base = meta.get("fname", symbol)
-
-    st.success(f"✅  Successfully downloaded **{total_rows:,} rows** of data for **{symbol}**!")
-
-    # ── Sample data table ───────────────────────────────────────────────────
-    with st.expander(f"📋  Show sample data (first 10 of {total_rows:,} rows)"):
-        sample = pd.read_csv(io.BytesIO(_ss("last_csv")), nrows=10)
-        st.dataframe(sample, width="stretch", hide_index=True)
-
-    # ── Download buttons ───────────────────────────────────────────────────
-    st.markdown("#### 💾  Save your data")
-
-    dl1, dl2 = st.columns([2, 2])
-
-    dl1.download_button(
-        label="📄  Download as CSV",
-        data=_ss("last_csv"),
-        file_name=f"{fname_base}.csv",
-        mime="text/csv",
-        width="stretch",
-        type="primary",
-        help="Opens in Excel, Google Sheets, or any spreadsheet app.",
-    )
-
-    if dl2.button("🗑️  Clear", width="stretch"):
-        for k in ["last_meta", "last_csv"]:
-            st.session_state.pop(k, None)
+        st.error(f"Could not log in: {exc}")
+    else:
+        st.session_state["client"] = client
         st.rerun()
 
 
+def _log_out() -> None:
+    client = st.session_state.get("client")
+    if client is not None:
+        client.close()
+    st.session_state.clear()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Tab 2 — Search
+# Pickers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_search_tab() -> None:
-    st.header("🔍  Find a stock or instrument")
-    st.caption("Use this to discover the exact symbol name before downloading.")
+def _cached(key: Tuple[str, ...], build: Callable[[], object]) -> object:
+    """Per-session memo — option lists are built from a ~100k-row table."""
+    cache = st.session_state.setdefault("_options", {})
+    if key not in cache:
+        cache[key] = build()
+    return cache[key]
 
-    if not is_logged_in():
-        st.info("Please log in using the sidebar first.")
-        return
 
-    client = get_client()
+def _pick_instrument(client: PyZData) -> Tuple[str, Optional[str]]:
+    exchange = st.segmented_control(
+        "Exchange", EXCHANGES, default="NSE", key="exchange", help=EXCHANGE_HELP,
+    ) or "NSE"
+    instruments = client.instruments
 
-    col1, col2, col3 = st.columns([3, 1, 1])
-    with col1:
-        query = st.text_input(
-            "Search",
-            placeholder="Type any part of the name — e.g.  HDFC,  NIFTY,  TATA",
+    if exchange not in DERIVATIVE_EXCHANGES:
+        options = _cached(("cash", exchange), lambda: instrument_options(instruments, exchange))
+        symbol = st.selectbox(
+            "Stock or index",
+            list(options),
+            index=None,
+            format_func=options.get,
+            placeholder="Type to search — e.g. RELIANCE, NIFTY 50, TCS",
+            key=f"symbol_{exchange}",
+        )
+        return exchange, symbol
+
+    # Thousands of contracts per exchange, and people think "nifty 23000 pe" —
+    # words in any order — which a dropdown's built-in filter can't match.
+    table = _cached(("contracts", exchange), lambda: contract_table(instruments, exchange))
+    query = st.text_input(
+        "Search contracts",
+        placeholder="e.g. nifty 23000 pe — then press Enter",
+        help="Any words, any order: name, strike, FUT / CE / PE, expiry month. "
+             "Try: banknifty fut · 23000 nifty · crudeoil oct ce",
+        key=f"query_{exchange}",
+    )
+    matches = search_contracts(table, query, limit=_MAX_MATCHES)
+    if not query.strip():
+        hint = "Search first"
+    elif not matches:
+        hint = "No match — try fewer words"
+    elif len(matches) == _MAX_MATCHES:
+        hint = f"First {_MAX_MATCHES} matches — add a word to narrow"
+    else:
+        hint = f"{len(matches)} matches — choose one"
+    symbol = st.selectbox(
+        "Contract",
+        list(matches),
+        index=None,
+        format_func=matches.get,
+        placeholder=hint,
+        disabled=not matches,
+        key=f"contract_{exchange}",
+    )
+    return exchange, symbol
+
+
+def _pick_dates() -> Optional[Tuple[date, date]]:
+    today = date.today()
+    period = st.pills(
+        "Period", list(PERIODS) + [_CUSTOM], default=_DEFAULT_PERIOD, key="period",
+    ) or _DEFAULT_PERIOD
+
+    if period != _CUSTOM:
+        start, end = period_to_dates(period, today)
+        st.caption(f"{start:%d %b %Y} → {end:%d %b %Y}")
+        return start, end
+
+    left, right = st.columns(2)
+    start = left.date_input("From", value=today - timedelta(days=365), max_value=today)
+    end = right.date_input("To", value=today, max_value=today)
+    if start > end:
+        st.error("The From date must be on or before the To date.")
+        return None
+    return start, end
+
+
+def _pick_interval() -> Tuple[str, Interval]:
+    choice = st.pills(
+        "Candle interval", MAIN_INTERVALS + [_OTHER], default=MAIN_INTERVALS[0], key="interval",
+    ) or MAIN_INTERVALS[0]
+    if choice == _OTHER:
+        choice = st.selectbox(
+            "Other interval",
+            [label for label in INTERVALS if label not in MAIN_INTERVALS],
             label_visibility="collapsed",
         )
-    with col2:
-        exch = st.selectbox("Exchange", ["All"] + EXCHANGES, label_visibility="collapsed")
-    with col3:
-        go = st.button("Search", type="primary", width="stretch")
+    return choice, INTERVALS[choice]
 
-    if go or query:
-        if not query.strip():
-            st.warning("Type something to search for.")
-            return
 
-        exchange_filter = None if exch == "All" else exch
-        with st.spinner("Searching …"):
-            results = client.search_instruments(query.strip(), exchange=exchange_filter)
+# ─────────────────────────────────────────────────────────────────────────────
+# Download
+# ─────────────────────────────────────────────────────────────────────────────
 
-        if results.empty:
-            st.error(
-                f"No instruments found matching **{query}**. "
-                "Try a shorter search term or a different exchange."
+def render_downloader(client: PyZData) -> None:
+    title, account = st.columns([4, 1], vertical_alignment="bottom")
+    title.title(_TITLE)
+    account.caption(f"Logged in as **{client.user_name or 'Zerodha user'}**")
+    account.button("Log out", on_click=_log_out, width="stretch")
+
+    controls, output = st.columns([2, 3], gap="large")
+
+    with controls:
+        exchange, symbol = _pick_instrument(client)
+        dates = _pick_dates()
+        interval_label, interval = _pick_interval()
+
+        with_oi = False
+        if exchange in DERIVATIVE_EXCHANGES:
+            with_oi = st.checkbox(
+                "Include open interest", value=True,
+                help="Adds an open_interest column — the number of outstanding contracts.",
             )
+
+        if dates:
+            requests_needed = math.ceil(((dates[1] - dates[0]).days + 1) / _max_days(interval))
+            if requests_needed > 10:
+                st.caption(
+                    f"This needs about {requests_needed} requests to Zerodha — "
+                    "a shorter period or a longer interval is quicker."
+                )
+
+        job = st.session_state.get("job")
+        if job:
+            label = f"Downloading {job['symbol']} …"
         else:
-            st.success(f"Found **{len(results):,}** instrument(s) matching '{query}'.")
+            label = f"Download {symbol}" if symbol else "Pick an instrument to download"
+        clicked = st.button(
+            label, type="primary", width="stretch", disabled=bool(job) or not (symbol and dates),
+        )
 
-            display_cols = [c for c in
-                ["tradingsymbol", "exchange", "instrument_type", "name",
-                 "instrument_token", "expiry", "strike", "lot_size"]
-                if c in results.columns]
+    with output:
+        if job:
+            _attach(job)
+        elif clicked:
+            _start_download(client, symbol, exchange, dates, interval_label, interval, with_oi)
 
-            st.dataframe(results[display_cols], width="stretch", height=460)
-
-            st.caption(
-                "👆  Copy the **tradingsymbol** and **exchange** values from above, "
-                "then paste them in the Download tab."
+        notice = st.session_state.get("notice")
+        if notice:
+            (st.error if notice[0] == "error" else st.warning)(notice[1])
+        if "result" in st.session_state:
+            _render_result(st.session_state["result"])
+        elif not notice:
+            st.info(
+                "Pick an instrument, a period and an interval, then press **Download**. "
+                "The price chart and the CSV / Excel buttons will appear here.",
+                icon=":material/show_chart:",
             )
 
-            csv = results[display_cols].to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "Save search results as CSV",
-                data=csv,
-                file_name=f"search_{query.replace(' ', '_')}.csv",
-                mime="text/csv",
-            )
+
+def _new_job(work: Callable[[Callable[[int, int], None]], pd.DataFrame], symbol: str,
+             interval_label: str) -> dict:
+    """Start *work* on a background thread and return the job that tracks it.
+
+    Why a thread: Streamlit aborts the running script at its next ``st.`` call
+    whenever a new click arrives.  A download living inside the script would
+    be thrown away by a double-click (and fetched all over again) or by
+    touching any other control (and simply vanish).  A job kept in session
+    state outlives script runs; each run merely attaches to it.
+
+    *work* receives a ``report(done, total)`` callback.  It must not call
+    Streamlit — it is not on the script thread.
+    """
+    job = {"symbol": symbol, "interval_label": interval_label, "progress": (0, 1)}
+    started = time.perf_counter()
+
+    def report(done: int, total: int) -> None:
+        job["progress"] = (done, total)  # one assignment, so readers never see half an update
+
+    def run() -> pd.DataFrame:
+        try:
+            return work(report)
+        finally:
+            job["seconds"] = time.perf_counter() - started
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    job["future"] = pool.submit(run)
+    pool.shutdown(wait=False)  # the thread ends with the job
+    return job
+
+
+def _start_download(
+    client: PyZData,
+    symbol: str,
+    exchange: str,
+    dates: Tuple[date, date],
+    interval_label: str,
+    interval: Interval,
+    with_oi: bool,
+) -> None:
+    def work(report: Callable[[int, int], None]) -> pd.DataFrame:
+        token = client.get_instrument_token(symbol, exchange)
+        return client.get_data(
+            token, str(dates[0]), str(dates[1]), interval,
+            oi=with_oi, progress_callback=report,
+        )
+
+    st.session_state.pop("result", None)
+    st.session_state.pop("notice", None)
+    st.session_state["job"] = _new_job(work, symbol, interval_label)
+    st.rerun()  # redraw with the button disabled, then attach to the job
+
+
+def _attach(job: dict) -> None:
+    """Show *job*'s progress until it finishes, then store what it produced."""
+    future, symbol = job["future"], job["symbol"]
+    bar = st.progress(0.0, text=f"Downloading {symbol} …")
+    while not future.done():
+        done, total = job["progress"]
+        bar.progress(min(done / total, 1.0), text=f"Downloading {symbol} … part {done} of {total}")
+        wait([future], timeout=0.25)
+
+    # No Streamlit calls until session state is updated: each one is a point
+    # where a new click can abort this run, and the outcome must not go with it.
+    result, notice = _outcome(job)
+    del st.session_state["job"]
+    if result:
+        st.session_state["result"] = result
+    if notice:
+        st.session_state["notice"] = notice
+    st.rerun()  # redraw with the Download button enabled again
+
+
+def _outcome(job: dict) -> Tuple[Optional[dict], Optional[Tuple[str, str]]]:
+    """``(result, notice)`` of a finished job.  Pure — no Streamlit calls."""
+    symbol, interval_label = job["symbol"], job["interval_label"]
+    warning = None
+    try:
+        df = job["future"].result()
+    except PartialDataError as exc:
+        df = exc.partial_data
+        gaps = ", ".join(f"{start:%d %b %Y} → {end:%d %b %Y}" for start, end in exc.failed_ranges)
+        warning = (
+            f"Some of the data could not be downloaded and is **missing** from the "
+            f"file: {gaps}. Click Download again to retry."
+        )
+    except DataFetchError as exc:
+        if "expired" in str(exc):
+            return None, ("error", "Your Zerodha session has expired. Log out, then log in again.")
+        return None, ("error", f"Download failed: {exc}. Wait a moment and try again.")
+    except PyZDataError as exc:
+        return None, ("error", str(exc))
+
+    if df.empty:
+        return None, ("warning", (
+            f"Zerodha has no {interval_label.lower()} data for **{symbol}** in this period. "
+            "It may not have been listed yet — try a different period."
+        ))
+
+    # Keep only bytes and small frames: Streamlit holds session state in
+    # memory for the whole session, and a 1-minute download can be huge.
+    return {
+        "title": f"{symbol} · {interval_label}",
+        "rows": len(df),
+        "seconds": job["seconds"],
+        "first": df["datetime"].min(),
+        "last": df["datetime"].max(),
+        "last_close": float(df["close"].iloc[-1]),
+        "stem": file_stem(symbol, df, interval_label),
+        "csv": df.to_csv(index=False).encode("utf-8"),
+        "chart": chart_frame(df),
+        "preview": df.head(10),
+        "warning": warning,
+    }, None
+
+
+def _render_result(result: dict) -> None:
+    st.subheader(result["title"])
+    # A caption, not a metric: the date range is too long for a metric column.
+    # The fetch time is shown because it is nearly all of the wait, and it is
+    # Zerodha's speed and rate limit (3 requests/s), not this app.
+    st.caption(
+        f"{result['first']:%d %b %Y} → {result['last']:%d %b %Y}"
+        f" · fetched from Zerodha in {result['seconds']:.0f} s"
+    )
+    if result["warning"]:
+        st.warning(result["warning"])
+
+    rows, close = st.columns(2)
+    rows.metric("Rows", f"{result['rows']:,}")
+    close.metric("Last close", f"{result['last_close']:,.2f}")
+
+    st.line_chart(result["chart"], height=320, color=_CHART_COLOR)
+
+    csv = result["csv"]
+    left, right = st.columns(2)
+    left.download_button(
+        "Save as CSV", csv, file_name=f"{result['stem']}.csv", mime="text/csv",
+        type="primary", width="stretch",
+    )
+    too_big = result["rows"] > EXCEL_MAX_ROWS
+    right.download_button(
+        "Save as Excel",
+        # Built only when clicked, so people who want CSV never wait for it.
+        lambda: to_excel_bytes(pd.read_csv(io.BytesIO(csv), parse_dates=["datetime"])),
+        file_name=f"{result['stem']}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        width="stretch",
+        disabled=too_big,
+        help=f"Excel can't hold more than {EXCEL_MAX_ROWS:,} rows — use CSV." if too_big else None,
+    )
+
+    with st.expander("Preview the first rows"):
+        st.dataframe(result["preview"], hide_index=True, width="stretch")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tab 3 — Help
+# Help
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_help_tab() -> None:
-    st.header("ℹ️  Help & FAQ")
-
-    with st.expander("What is PyZData?", expanded=True):
-        st.markdown("""
-PyZData is a **free, open-source tool** for downloading historical Indian stock market
-data directly from **Zerodha** (India's largest stockbroker).
-
-It works with:
-- **Stocks** — any company listed on NSE or BSE
-- **Indices** — NIFTY 50, BANK NIFTY, SENSEX, etc.
-- **Futures & Options (F&O)** — from the NSE F&O segment
-- **Commodities** — from MCX
-
-Data is returned in a table with columns: **Date/Time, Open, High, Low, Close, Volume**.
-""")
-
-    with st.expander("Do I need a paid Zerodha account?"):
-        st.markdown("""
-Yes — you need a **Zerodha trading account** to log in.
-
-However, there is **no extra charge** for downloading historical data. It uses the
-same Kite web platform you already have access to.
-
-If you don't have a Zerodha account, you can open one at [zerodha.com](https://zerodha.com).
-""")
-
-    with st.expander("How do I get my enctoken?"):
-        st.markdown("""
-The enctoken is like a temporary password that proves you're logged into Kite.
-
-**Steps:**
-1. Open [kite.zerodha.com](https://kite.zerodha.com) and log in.
-2. Press **F12** (Windows/Linux) or **Cmd+Option+I** (Mac) to open DevTools.
-3. Click the **Application** tab → **Cookies** → **kite.zerodha.com**.
-4. Find the row named **`enctoken`** and copy the value.
-
-The enctoken is valid until you log out of Kite. If data stops downloading, get a fresh one.
-""")
-
-    with st.expander("What does each data frequency mean?"):
-        for label, (_, desc) in FREQUENCY_OPTIONS.items():
-            st.markdown(f"**{label}** — {desc}")
-
-    with st.expander("What is Open Interest (OI)?"):
-        st.markdown("""
-Open Interest is the total number of outstanding F&O contracts that have not been settled.
-
-- Only relevant for **Futures and Options** instruments (NFO, MCX)
-- Has **no meaning** for regular stocks or indices
-- Enable the OI option in Advanced Settings only when downloading F&O data
-""")
-
-    with st.expander("How far back can I download data?"):
-        st.markdown("""
-The Zerodha API allows the following maximum lookback periods:
-
-| Interval | Maximum history |
-|----------|----------------|
-| Daily | Full history (many years) |
-| 60 minutes | ~400 days |
-| 30 minutes | ~400 days |
-| 15 minutes | ~400 days |
-| 5 minutes | ~100 days |
-| 1 minute | ~60 days |
-
-For longer history, use Daily candles.
-""")
-
-    with st.expander("Why does the symbol not work?"):
-        st.markdown("""
-Symbols are **case-sensitive** and must match exactly. Common issues:
-
-| You typed | Correct symbol |
-|-----------|---------------|
-| NIFTY     | NIFTY 50      |
-| BANKNIFTY | NIFTY BANK    |
-| HDFC BANK | HDFCBANK      |
-| INFOSY    | INFY          |
-
-**Fix:** Use the **🔍 Search** tab to find the exact symbol name, then copy-paste it.
-""")
-
-    with st.expander("Is my data and password safe?"):
-        st.markdown("""
-- **Your password is never stored** — it is sent directly to Zerodha's login server.
-- **Your enctoken is never stored** — it lives only in your browser session and disappears when you close the tab.
-- This app has **no database** and makes **no outbound connections** other than to Zerodha's API.
-- The complete source code is available on GitHub for independent review.
-""")
-
+def render_help() -> None:
     st.divider()
-    st.markdown("""
-**Still stuck?** Open an issue on GitHub:
-[github.com/vikassharma545/Historical-Market-data-From-Zerodha](https://github.com/vikassharma545/Historical-Market-data-From-Zerodha)
+    with st.expander("Help"):
+        st.markdown(f"""
+**What do I get?** One row per candle: `tradingsymbol, datetime, open, high, low, close,
+volume` (plus `open_interest` for futures & options). Times are in IST.
+
+**Which interval should I pick?** *Day* for long-term trends and backtests; *1 hour* to
+*15 min* for swing trading; *5 min* and *1 min* for intraday work. Shorter intervals make
+much bigger files and take longer to download.
+
+**I can't find my instrument.** Check the exchange first — shares and indices are on
+NSE / BSE, futures & options on NFO / BFO, commodities on MCX / NCO, currency on CDS. Then type
+part of the name in the dropdown. For futures & options, search with words in any order —
+`nifty 23000 pe`, `banknifty fut`, `crudeoil oct` — and press Enter. Expired contracts are not available from Zerodha.
+
+**What is open interest?** The number of futures or options contracts still open. It only
+exists for derivatives, so the option appears only on those exchanges.
+
+**The download says my session expired.** Zerodha ends a session when you log in to Kite
+somewhere else. Log out here and log in again with a fresh enctoken.
+
+**Do I need to pay?** No. You need a Zerodha account, but not the paid Kite Connect API.
+
+Still stuck? [Open an issue on GitHub]({_REPO_URL}/issues). &nbsp; · &nbsp; PyZData v{__version__}
 """)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# State initialisation
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _init_state() -> None:
-    """Set default session-state values on the very first run."""
-    defaults: dict = {
-        "sym":        "",
-        "exch":       "NSE",
-        "start_date": date.today() - timedelta(days=365),
-        "end_date":   date.today(),
-    }
-    for key, val in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = val
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-_CSS = """
-<style>
-/* ── hide Streamlit footer ── */
-footer     { visibility: hidden; }
-
-/* ── hide Deploy button ── */
-.stAppDeployButton { visibility: hidden; }
-
-/* ── rounded primary button ── */
-.stButton > button[kind="primary"] {
-    border-radius: 10px;
-    font-size: 17px;
-    font-weight: 600;
-    padding: 12px 28px;
-    background: #2563eb;
-    border-color: #2563eb;
-}
-.stButton > button[kind="primary"]:hover {
-    background: #1d4ed8;
-    border-color: #1d4ed8;
-}
-
-/* ── stock chip buttons ── */
-div[data-testid="column"] .stButton > button {
-    border-radius: 20px;
-    font-size: 13px;
-    padding: 6px 14px;
-}
-
-/* ── info banner — rgba background so text stays readable in dark mode ── */
-.info-card {
-    background: rgba(37, 99, 235, 0.10);
-    border-left: 4px solid #2563eb;
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin-bottom: 10px;
-}
-.step-header {
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 4px;
-    margin-top: 24px;
-}
-</style>
-"""
-
-
 def main() -> None:
-    # These two calls MUST stay inside main() so they run on every Streamlit
-    # rerun (not just once when the module is first imported).
     st.set_page_config(
-        page_title="PyZData – Stock Data Downloader",
-        page_icon="📊",
-        layout="wide",
-        initial_sidebar_state="expanded",
+        page_title="PyZData — market data downloader", page_icon="📊", layout="wide",
     )
     st.markdown(_CSS, unsafe_allow_html=True)
 
-    _init_state()
-    render_sidebar()
-
-    st.markdown("## 📊 PyZData — Indian Stock Market Data Downloader")
-
-    if not is_logged_in():
-        st.markdown("*Log in using the sidebar on the left to get started.*")
+    client = st.session_state.get("client")
+    if client is None:
+        render_login()
     else:
-        st.markdown("*You are logged in. Pick a stock below and download.*")
-
-    st.divider()
-
-    tab1, tab2, tab3 = st.tabs(["📥  Download Data", "🔍  Search for a Stock", "ℹ️  Help"])
-
-    with tab1:
-        render_download_tab()
-    with tab2:
-        render_search_tab()
-    with tab3:
-        render_help_tab()
+        render_downloader(client)
+    render_help()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,14 @@
+# Kite-like look: white page, grey text, blue accent, sharp corners.
+# Keep in sync with _THEME in pyzdata/run_web.py (used by `pyzdata-web`).
 [theme]
 base="light"
+primaryColor="#387ed1"
+backgroundColor="#ffffff"
+secondaryBackgroundColor="#f6f7f9"
+textColor="#444444"
+linkColor="#387ed1"
+borderColor="#e0e0e0"
+baseRadius="4px"
 
 [runner]
 magicEnabled=false

@@ -116,3 +116,36 @@ class TestMakeAuthHeaders:
 
     def test_different_tokens_produce_different_headers(self):
         assert KiteAuth.make_auth_headers("a") != KiteAuth.make_auth_headers("b")
+
+
+# ---------------------------------------------------------------------------
+# fetch_profile
+# ---------------------------------------------------------------------------
+
+class TestFetchProfile:
+
+    def test_returns_profile_for_valid_token(self, auth, mock_session, config):
+        mock_session.get.return_value = _resp(
+            200, {"status": "success", "data": {"user_id": "AB1234", "user_name": "Asha"}}
+        )
+        profile = auth.fetch_profile("good-token")
+
+        assert profile["user_name"] == "Asha"
+        args, kwargs = mock_session.get.call_args
+        assert args[0] == config.profile_url
+        assert kwargs["headers"] == {"Authorization": "enctoken good-token"}
+
+    def test_http_403_raises_invalid_enctoken(self, auth, mock_session):
+        mock_session.get.return_value = _resp(403)
+        with pytest.raises(AuthenticationError, match="Invalid or expired enctoken"):
+            auth.fetch_profile("bad-token")
+
+    def test_error_status_raises_invalid_enctoken(self, auth, mock_session):
+        mock_session.get.return_value = _resp(200, {"status": "error", "message": "nope"})
+        with pytest.raises(AuthenticationError, match="Invalid or expired enctoken"):
+            auth.fetch_profile("bad-token")
+
+    def test_network_failure_raises_network_error(self, auth, mock_session):
+        mock_session.get.side_effect = requests.ConnectionError("unreachable")
+        with pytest.raises(AuthenticationError, match="Network error"):
+            auth.fetch_profile("any-token")

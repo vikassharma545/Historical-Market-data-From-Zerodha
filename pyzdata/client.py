@@ -98,13 +98,18 @@ class PyZData:
         try:
             authenticator = KiteAuth(self._session, self._config)
 
+            self._user_name: Optional[str] = None
             if enctoken is not None:
-                _token = enctoken
-                logger.info("Using pre-supplied enctoken.")
+                _token = enctoken.strip()
+                # Fail now, with a clear message, rather than mid-download.
+                profile = authenticator.fetch_profile(_token)
+                self._user_name = profile.get("user_name") or profile.get("user_id")
+                logger.info("Enctoken accepted.")
             elif user_id is not None and password is not None and totp is not None:
                 _token = authenticator.login_with_credentials(
                     user_id, password, str(totp)
                 )
+                self._user_name = user_id
             else:
                 raise ConfigurationError(
                     "Provide either 'enctoken' or all three of "
@@ -139,6 +144,16 @@ class PyZData:
         self.close()
 
     # ---------------------------------------------------------------- public
+
+    @property
+    def user_name(self) -> Optional[str]:
+        """Name of the logged-in Zerodha user (the user ID for credential logins)."""
+        return self._user_name
+
+    @property
+    def instruments(self) -> pd.DataFrame:
+        """The full Zerodha instruments master.  Treat it as read-only."""
+        return self._instruments.dataframe
 
     def get_instrument_token(self, tradingsymbol: str, exchange: str) -> int:
         """Resolve a *tradingsymbol* + *exchange* pair to an instrument token.

@@ -1,14 +1,18 @@
 """Historical OHLCV candle downloader.
 
-The downloader splits a date range into calendar-month windows and fetches
-each window in parallel using a thread pool.  This matches the Zerodha API's
-natural pagination unit and dramatically speeds up long historical downloads.
+The downloader splits a date range into the largest windows the Kite API
+accepts for the requested interval and fetches them in parallel using a
+thread pool.  Daily candles fit ~5 years into one request; 1-minute candles
+need one request per 60 days.
 
 Design decisions
 ----------------
-* Month windows are computed from the *exact* start/end dates, not from the
-  1st of the month.  The original code always started from the 1st and then
-  filtered; this approach requests only the data we actually need.
+* Window size depends on the interval (see ``_max_days``).  Earlier versions
+  always used calendar months, which cost 60 requests for 5 years of daily
+  data where a single request is enough.
+* A failed window is never dropped silently.  It is retried once; if it
+  still fails the caller gets a :class:`~pyzdata.exceptions.PartialDataError`
+  that names the missing ranges and carries the rows that did download.
 * Timezone handling: Zerodha returns IST timestamps (``+05:30`` suffix).
   We parse them as UTC-aware, convert to IST, then strip the tz-info to
   produce naive IST timestamps — consistent with how most Indian trading
@@ -36,7 +40,7 @@ import pandas as pd
 import requests
 
 from .config import Config
-from .exceptions import DataFetchError
+from .exceptions import DataFetchError, PartialDataError
 from .instruments import InstrumentManager
 from .models import Interval
 
@@ -47,6 +51,28 @@ _BASE_COLS: List[str] = ["datetime", "open", "high", "low", "close", "volume"]
 _OI_COLS:   List[str] = _BASE_COLS + ["open_interest"]
 
 _IST_TZ = "Asia/Kolkata"
+
+# Largest date span (in days) the Kite API serves in a single request.
+_MAX_DAYS_PER_REQUEST: Dict[Interval, int] = {
+    Interval.MINUTE_1:  60,
+    Interval.MINUTE_2:  60,
+    Interval.MINUTE_3:  60,
+    Interval.MINUTE_4:  60,
+    Interval.MINUTE_5:  100,
+    Interval.MINUTE_10: 100,
+    Interval.MINUTE_15: 200,
+    Interval.MINUTE_30: 200,
+    Interval.HOUR_1:    400,
+    Interval.HOUR_2:    400,
+    Interval.HOUR_3:    400,
+    Interval.HOUR_4:    400,
+    Interval.DAY:       2000,
+}
+
+
+def _max_days(interval: Interval) -> int:
+    # Unknown intervals get the smallest window — slower, but always accepted.
+    return _MAX_DAYS_PER_REQUEST.get(interval, 60)
 
 
 def _expected_cols(oi: bool) -> List[str]:
@@ -103,8 +129,9 @@ class DataDownloader:
     ) -> pd.DataFrame:
         """Download candles for *instrument_token* over [start_date, end_date].
 
-        The date range is split into calendar-month windows and fetched
-        in parallel (up to ``config.max_workers`` threads).
+        The date range is split into the largest windows the API allows for
+        *interval* and fetched in parallel (up to ``config.max_workers``
+        threads).
 
         Parameters
         ----------
@@ -130,8 +157,11 @@ class DataDownloader:
             If ``start_date > end_date``.
         DataFetchError
             On HTTP or API-level failures.
+        PartialDataError
+            When only some date ranges failed.  ``exc.partial_data`` holds
+            the rows that were fetched, ``exc.failed_ranges`` the gaps.
         """
-        from_dt = pd.to_datetime(start_date).normalize()
+        from_dt =pd.to_datetime(start_date).normalize()
         to_dt   = pd.to_datetime(end_date).normalize()
 
         if from_dt > to_dt:
@@ -139,25 +169,37 @@ class DataDownloader:
                 f"start_date '{start_date}' must not be after end_date '{end_date}'"
             )
 
-        # Resolve symbol once — avoids a linear DataFrame scan per month window.
+        # Resolve symbol once — avoids a linear DataFrame scan per window.
         symbol = self._instruments.get_symbol(instrument_token)
-        windows = list(_month_windows(from_dt, to_dt))
+        windows = list(_date_windows(from_dt, to_dt, _max_days(interval)))
 
         logger.info(
             "Fetching %s | %s → %s | interval=%s | %d window(s)",
             symbol, from_dt.date(), to_dt.date(), interval.value, len(windows),
         )
 
-        frames = self._fetch_all(instrument_token, windows, interval, oi, symbol, progress_callback)
+        frames, failed = self._fetch_all(
+            instrument_token, windows, interval, oi, symbol, progress_callback
+        )
 
-        if not frames:
+        if frames:
+            df = _clean(pd.concat(frames, ignore_index=True), from_dt, to_dt)
+        else:
+            df = pd.DataFrame(columns=["tradingsymbol"] + _expected_cols(oi))
+
+        if failed:
+            failed_ranges = [(s.date(), e.date()) for s, e in failed]
+            missing = ", ".join(f"{s} → {e}" for s, e in failed_ranges)
+            raise PartialDataError(
+                f"{len(failed)} of {len(windows)} date ranges failed for {symbol}: {missing}",
+                partial_data=df,
+                failed_ranges=failed_ranges,
+            )
+
+        if df.empty:
             logger.warning("No data returned for %s %s→%s", symbol, from_dt.date(), to_dt.date())
-            return pd.DataFrame(columns=["tradingsymbol"] + _expected_cols(oi))
-
-        df = pd.concat(frames, ignore_index=True)
-        df = _clean(df, from_dt, to_dt)
-
-        logger.info("Fetched %d rows for %s", len(df), symbol)
+        else:
+            logger.info("Fetched %d rows for %s", len(df), symbol)
         return df
 
     # -------------------------------------------------------------- private
@@ -170,41 +212,49 @@ class DataDownloader:
         oi: bool,
         symbol: str,
         progress_callback: Optional[Callable[[int, int], None]] = None,
-    ) -> List[pd.DataFrame]:
-        """Fetch all windows, in parallel when there are multiple."""
-        if len(windows) == 1:
-            # Single window — let errors propagate to the caller.
-            df = self._fetch_window(token, *windows[0], interval, oi, symbol)
-            if progress_callback:
-                progress_callback(1, 1)
-            return [df] if not df.empty else []
+    ) -> Tuple[List[pd.DataFrame], List[Tuple[pd.Timestamp, pd.Timestamp]]]:
+        """Fetch all windows in parallel and return ``(frames, failed_windows)``.
 
+        Raises the first :class:`DataFetchError` when *every* window failed —
+        that is an outage or an expired session, not a gap in the data.
+        """
         # Pre-allocate result slots to preserve chronological order after
         # out-of-order parallel completion.
         results: List[Optional[pd.DataFrame]] = [None] * len(windows)
-        total_windows = len(windows)
+        errors: Dict[int, DataFetchError] = {}
         completed = 0
-        progress_lock = Lock()
 
         with ThreadPoolExecutor(max_workers=self._config.max_workers) as pool:
             future_to_idx = {
                 pool.submit(self._fetch_window, token, s, e, interval, oi, symbol): i
                 for i, (s, e) in enumerate(windows)
             }
+            # Results are consumed on this thread only, so the progress
+            # callback never runs concurrently.
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]
                 try:
                     results[idx] = future.result()
                 except DataFetchError as exc:
-                    logger.error("Window %d failed: %s", idx, exc)
-                    results[idx] = pd.DataFrame()
+                    logger.warning("Window %d failed, will retry: %s", idx, exc)
+                    errors[idx] = exc
 
-                with progress_lock:
-                    completed += 1
-                    if progress_callback:
-                        progress_callback(completed, total_windows)
+                completed += 1
+                if progress_callback:
+                    progress_callback(completed, len(windows))
 
-        return [r for r in results if r is not None and not r.empty]
+        if len(errors) == len(windows):
+            raise errors[min(errors)]
+
+        for idx in sorted(errors):
+            try:
+                results[idx] = self._fetch_window(token, *windows[idx], interval, oi, symbol)
+                del errors[idx]
+            except DataFetchError as exc:
+                logger.error("Window %d failed again: %s", idx, exc)
+
+        frames = [r for r in results if r is not None and not r.empty]
+        return frames, [windows[i] for i in sorted(errors)]
 
     def _fetch_window(
         self,
@@ -215,7 +265,7 @@ class DataDownloader:
         oi: bool,
         symbol: str,
     ) -> pd.DataFrame:
-        """Fetch one calendar-month (or partial) window from the Kite API."""
+        """Fetch one date window from the Kite API."""
         url = self._URL.format(
             root=self._config.root_url, token=token, interval=interval.value
         )
@@ -237,6 +287,11 @@ class DataDownloader:
             )
             resp.raise_for_status()
         except requests.HTTPError as exc:
+            if exc.response.status_code in (401, 403):
+                raise DataFetchError(
+                    f"HTTP {exc.response.status_code} fetching {symbol}: your Zerodha "
+                    "session has expired or the enctoken is invalid. Log in again."
+                ) from exc
             raise DataFetchError(
                 f"HTTP {exc.response.status_code} fetching {symbol} "
                 f"({from_dt.date()} → {to_dt.date()})"
@@ -312,27 +367,22 @@ def _clean(df: pd.DataFrame, from_dt: pd.Timestamp, to_dt: pd.Timestamp) -> pd.D
     return df.sort_values("datetime").reset_index(drop=True)
 
 
-def _month_windows(
-    from_dt: pd.Timestamp, to_dt: pd.Timestamp
+def _date_windows(
+    from_dt: pd.Timestamp, to_dt: pd.Timestamp, max_days: int
 ) -> Generator[Tuple[pd.Timestamp, pd.Timestamp], None, None]:
-    """Yield ``(window_start, window_end)`` pairs, one per calendar month.
+    """Yield ``(window_start, window_end)`` pairs of at most *max_days* days.
 
-    The first window starts at *from_dt* (not the 1st of the month) and the
-    last window ends at *to_dt*, so we never request more data than needed.
+    Windows are contiguous and non-overlapping; the last one ends at *to_dt*.
 
     Example::
 
-        _month_windows("2024-01-15", "2024-03-10")
-        → (2024-01-15, 2024-01-31)
-        → (2024-02-01, 2024-02-29)
-        → (2024-03-01, 2024-03-10)
+        _date_windows("2024-01-01", "2024-05-31", max_days=60)
+        -> (2024-01-01, 2024-02-29)
+        -> (2024-03-01, 2024-04-29)
+        -> (2024-04-30, 2024-05-31)
     """
     current = from_dt
     while current <= to_dt:
-        # End of the current calendar month
-        month_end = current + pd.offsets.MonthEnd(0)
-        # Clip to the actual requested end date
-        window_end = min(month_end, to_dt)
+        window_end = min(current + pd.Timedelta(days=max_days - 1), to_dt)
         yield current, window_end
-        # Start of the next month
-        current = (month_end + pd.Timedelta(days=1)).normalize()
+        current = window_end + pd.Timedelta(days=1)

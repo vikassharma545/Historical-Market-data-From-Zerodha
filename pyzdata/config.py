@@ -33,6 +33,8 @@ class Config:
     root_url: str = "https://kite.zerodha.com/oms"
     login_url: str = "https://kite.zerodha.com/api/login"
     twofa_url: str = "https://kite.zerodha.com/api/twofa"
+    #: Cheap authenticated endpoint used to check that an enctoken is valid.
+    profile_url: str = "https://kite.zerodha.com/oms/user/profile"
     instruments_url: str = "https://api.kite.trade/instruments"
 
     # --------------------------------------------------------- Retry / HTTP

@@ -25,16 +25,26 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from . import Interval, PyZData
-from .exceptions import PyZDataError
+from .exceptions import PartialDataError, PyZDataError
+
+_ENCTOKEN_ENV = "PYZDATA_ENCTOKEN"
 
 
 def _add_auth_args(parser: argparse.ArgumentParser) -> None:
     """Add authentication flags to a parser."""
-    auth = parser.add_mutually_exclusive_group(required=True)
-    auth.add_argument("--enctoken", metavar="TOKEN", help="Zerodha enctoken")
+    # PYZDATA_ENCTOKEN keeps the token out of shell history and process lists.
+    env_token = os.getenv(_ENCTOKEN_ENV) or None
+    auth = parser.add_mutually_exclusive_group(required=env_token is None)
+    auth.add_argument(
+        "--enctoken",
+        metavar="TOKEN",
+        default=env_token,
+        help=f"Zerodha enctoken (default: ${_ENCTOKEN_ENV})",
+    )
     auth.add_argument("--user-id", metavar="ID", help="Zerodha user ID")
     parser.add_argument("--password", metavar="PW", help="Password (required with --user-id)")
     parser.add_argument("--totp", metavar="CODE", help="TOTP code (required with --user-id)")
@@ -145,7 +155,14 @@ def _handle_search(client: PyZData, args: argparse.Namespace) -> None:
 def _handle_download(client: PyZData, args: argparse.Namespace) -> None:
     interval = next(i for i in Interval if i.value == args.interval)
     token = client.get_instrument_token(args.symbol, args.exchange)
-    df = client.get_data(token, args.start, args.end, interval, oi=args.oi)
+    incomplete = False
+    try:
+        df = client.get_data(token, args.start, args.end, interval, oi=args.oi)
+    except PartialDataError as exc:
+        # Keep what was fetched, but make the gaps impossible to miss.
+        print(f"Warning: {exc}", file=sys.stderr)
+        df = exc.partial_data
+        incomplete = True
 
     if df.empty:
         print("No data returned for the specified parameters.", file=sys.stderr)
@@ -157,8 +174,12 @@ def _handle_download(client: PyZData, args: argparse.Namespace) -> None:
     else:
         print(df.to_string())
 
+    if incomplete:
+        sys.exit(2)
+
 
 def _build_client(args: argparse.Namespace) -> PyZData:
-    if getattr(args, "enctoken", None):
-        return PyZData(enctoken=args.enctoken)
-    return PyZData(user_id=args.user_id, password=args.password, totp=args.totp)
+    # An explicit --user-id beats an enctoken that only came from the environment.
+    if getattr(args, "user_id", None):
+        return PyZData(user_id=args.user_id, password=args.password, totp=args.totp)
+    return PyZData(enctoken=args.enctoken)

@@ -66,6 +66,45 @@ class KiteAuth:
         logger.info("Login successful for %s", user_id)
         return enctoken
 
+    def fetch_profile(self, enctoken: str) -> Dict[str, object]:
+        """Return the Kite user profile, proving that *enctoken* is valid.
+
+        An enctoken is just an opaque string until it is used, so without
+        this check a mistyped or expired token only fails much later, in the
+        middle of a download.
+
+        Raises
+        ------
+        AuthenticationError
+            When Kite rejects the token or cannot be reached.
+        """
+        try:
+            resp = self._session.get(
+                self._config.profile_url,
+                headers=self.make_auth_headers(enctoken),
+                timeout=self._config.request_timeout,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except requests.HTTPError as exc:
+            raise AuthenticationError(
+                f"Invalid or expired enctoken (HTTP {exc.response.status_code}). "
+                "Log in to kite.zerodha.com again and copy a fresh enctoken."
+            ) from exc
+        except requests.RequestException as exc:
+            raise AuthenticationError(
+                f"Network error while checking the enctoken: {exc}"
+            ) from exc
+        except ValueError:
+            payload = {}
+
+        if payload.get("status") != "success":
+            raise AuthenticationError(
+                "Invalid or expired enctoken. "
+                "Log in to kite.zerodha.com again and copy a fresh enctoken."
+            )
+        return payload.get("data") or {}
+
     @staticmethod
     def make_auth_headers(enctoken: str) -> Dict[str, str]:
         """Return the Authorization header dict for Kite API calls."""
