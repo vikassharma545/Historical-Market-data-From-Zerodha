@@ -37,8 +37,8 @@ jobs:
         run: python -m build
 
       - name: Publish package
-        # Pinned to a commit: a branch ref could change under us.
-        uses: pypa/gh-action-pypi-publish@106e0b0b7c337fa67ed433972f777c6357f78598  # v1.13.0
+        # Use the maintained v1 release channel to avoid stale image digests.
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           # Print the SHA-256 of each uploaded file so it can be checked against PyPI.
           print-hash: true
