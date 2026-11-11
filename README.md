@@ -9,7 +9,7 @@ commodities — as CSV, Excel or a pandas DataFrame.**
 
 It's free: you need a Zerodha account, but not the paid Kite Connect API.
 
-![The PyZData web app, showing a year of daily RELIANCE prices](https://raw.githubusercontent.com/vikassharma545/Historical-Market-data-From-Zerodha/main/docs/web-app.jpg)
+![The PyZData web app, showing a year of daily RELIANCE prices](https://raw.githubusercontent.com/vikassharma545/Historical-Market-data-From-Zerodha/d280c3b6458864baa9fa246366e3871f4d16cc34/docs/web-app.jpg)
 <sub>The web app (sample data).</sub>
 
 ---
