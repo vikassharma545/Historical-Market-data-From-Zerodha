@@ -5,7 +5,7 @@ All notable changes to PyZData are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-11-11
 
 ### Changed
 - **Web app restyled as a trading desk:** warm grey page with white cards, one orange accent
@@ -150,6 +150,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Unit tests** — comprehensive mocked tests for auth, instruments, and downloader
 - **Open Interest** — optional `open_interest` column for F&O instruments
 
+[1.2.0]: https://github.com/vikassharma545/Historical-Market-data-From-Zerodha/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/vikassharma545/Historical-Market-data-From-Zerodha/compare/v1.0.6...v1.1.0
 [1.0.6]: https://github.com/vikassharma545/Historical-Market-data-From-Zerodha/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/vikassharma545/Historical-Market-data-From-Zerodha/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/vikassharma545/Historical-Market-data-From-Zerodha/compare/v1.0.3...v1.0.4
