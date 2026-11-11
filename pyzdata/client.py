@@ -64,7 +64,7 @@ class PyZData:
 
         from pyzdata import Config, PyZData
 
-        cfg = Config(max_workers=8, log_level="DEBUG")
+        cfg = Config(rate_limit_per_second=2, log_level="DEBUG")
         client = PyZData(enctoken="...", config=cfg)
 
     Logging
@@ -134,7 +134,8 @@ class PyZData:
     # -------------------------------------------------------- context manager
 
     def close(self) -> None:
-        """Close the underlying HTTP session and release connection pool resources."""
+        """Cancel any download still retrying and close the HTTP session."""
+        self._downloader.close()
         self._session.close()
 
     def __enter__(self) -> PyZData:
@@ -231,12 +232,16 @@ class PyZData:
             (plus ``open_interest`` when *oi=True*).
             Sorted by ``datetime`` ascending, no duplicate timestamps.
 
+        Every failed request is retried until it succeeds — network errors,
+        timeouts, "Too many requests", Kite API errors.  Only a logout stops it.
+
         Raises
         ------
         ValueError
             When ``start_date > end_date``.
         DataFetchError
-            On HTTP or API-level failures after all retries are exhausted.
+            When Zerodha logged the account out (``TokenException``), or
+            :meth:`close` was called while the download was retrying.
 
         Example
         -------
@@ -276,16 +281,23 @@ def _build_session(config: Config) -> requests.Session:
     return session
 
 
-def _configure_library_logging(level: str) -> None:
-    """Set the log level on the ``pyzdata`` logger.
+def _configure_library_logging(level: Optional[str]) -> None:
+    """Apply a log level the user asked for; otherwise leave logging to the app.
 
-    Only adds a ``StreamHandler`` if the ``pyzdata`` root logger has no
-    handlers yet — this respects any logging configuration the application
-    has already set up (i.e. we never override the host application's
-    logging setup).
+    Without an explicit level nothing is touched, so an application's own
+    ``logging`` setup (the CLI's ``--verbose`` included) decides.  A handler
+    is added only when nothing is configured anywhere — otherwise every line
+    would be printed twice.
     """
-    root = logging.getLogger("pyzdata")
-    if not root.handlers:
+    if not level:
+        return
+    lib = logging.getLogger("pyzdata")
+    try:
+        lib.setLevel(level)
+    except ValueError:
+        logger.warning("Unknown log level '%s' — ignored.", level)
+        return
+    if not lib.hasHandlers():  # also looks at the root logger
         handler = logging.StreamHandler()
         handler.setFormatter(
             logging.Formatter(
@@ -293,9 +305,4 @@ def _configure_library_logging(level: str) -> None:
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
         )
-        root.addHandler(handler)
-    try:
-        root.setLevel(level)
-    except ValueError:
-        root.setLevel(logging.WARNING)
-        logger.warning("Unknown log level '%s', defaulting to WARNING.", level)
+        lib.addHandler(handler)

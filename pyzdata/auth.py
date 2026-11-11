@@ -131,13 +131,19 @@ class KiteAuth:
                 f"Network error during login: {exc}"
             ) from exc
 
-        payload = resp.json()
+        try:
+            payload = resp.json()
+        except ValueError:  # an HTML error page instead of JSON
+            payload = {}
         if payload.get("status") != "success":
             raise AuthenticationError(
                 f"Login rejected by Kite: {payload.get('message', 'no message')}"
             )
 
-        return payload["data"]["request_id"]
+        request_id = (payload.get("data") or {}).get("request_id")
+        if not request_id:
+            raise AuthenticationError("Kite accepted the login but sent no request_id. Try again.")
+        return request_id
 
     def _step2_twofa(self, user_id: str, request_id: str, totp: str) -> str:
         """POST the TOTP and return the ``enctoken`` from the response cookie."""
@@ -164,7 +170,7 @@ class KiteAuth:
 
         try:
             payload = resp.json()
-        except (ValueError, requests.JSONDecodeError):
+        except ValueError:  # requests.JSONDecodeError is a ValueError
             payload = {}
         if payload.get("status") != "success":
             raise AuthenticationError(

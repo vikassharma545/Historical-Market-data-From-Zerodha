@@ -26,13 +26,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install build
-          
+
+      # Never publish a release whose tests fail.
+      - name: Run tests
+        run: |
+          pip install -e ".[web,dev]"
+          pytest
+
       - name: Build sdist and wheel
         run: python -m build
-        
+
       - name: Publish package
-        uses: pypa/gh-action-pypi-publish@release/v1
+        # Pinned to a commit: a branch ref could change under us.
+        uses: pypa/gh-action-pypi-publish@106e0b0b7c337fa67ed433972f777c6357f78598  # v1.13.0
         with:
-          # This verifies exactly which repository the action is publishing from
-          # mitigating risk of compromised credentials.
+          # Print the SHA-256 of each uploaded file so it can be checked against PyPI.
           print-hash: true

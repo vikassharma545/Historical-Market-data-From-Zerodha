@@ -22,21 +22,36 @@ from pyzdata.models import Interval
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _api_resp(candles: list, status: str = "success"):
-    """Build a mock response with a Kite-style candle payload."""
-    r = MagicMock(spec=requests.Response)
-    r.status_code = 200
-    r.raise_for_status.return_value = None
-    r.json.return_value = {"status": status, "data": {"candles": candles}}
-    return r
-
-
-def _http_error_resp(status_code: int):
+def _json_resp(payload, status_code: int = 200):
     r = MagicMock(spec=requests.Response)
     r.status_code = status_code
-    http_err = requests.HTTPError(response=r)
-    r.raise_for_status.side_effect = http_err
+    r.json.return_value = payload
     return r
+
+
+def _api_resp(candles: list):
+    """A successful Kite-style candle payload."""
+    return _json_resp({"status": "success", "data": {"candles": candles}})
+
+
+def _error_resp(message: str = "Something went wrong", error_type: str = "GeneralException",
+                status_code: int = 500):
+    """Kite's error shape: ``{"status": "error", "message": …, "error_type": …}``."""
+    return _json_resp(
+        {"status": "error", "message": message, "error_type": error_type}, status_code
+    )
+
+
+def _not_json_resp():
+    r = MagicMock(spec=requests.Response)
+    r.status_code = 502
+    r.json.side_effect = requests.JSONDecodeError("Expecting value", "<html>", 0)
+    return r
+
+
+@pytest.fixture(autouse=True)
+def no_retry_delay(monkeypatch):
+    monkeypatch.setattr("pyzdata.downloader.random.uniform", lambda a, b: 0)
 
 
 @pytest.fixture
@@ -191,31 +206,9 @@ class TestFetch:
         # Empty DF should still have the right columns
         assert "datetime" in df.columns
 
-    def test_http_500_raises_data_fetch_error(self, downloader, mock_session):
-        mock_session.get.return_value = _http_error_resp(500)
-        with pytest.raises(DataFetchError, match="HTTP 500"):
-            downloader.fetch(408065, "2024-01-02", "2024-01-02", Interval.DAY)
-
-    def test_api_error_status_raises(self, downloader, mock_session):
-        mock_session.get.return_value = _api_resp([], status="error")
-        # Override json to include message
-        resp = mock_session.get.return_value
-        resp.json.return_value = {"status": "error", "message": "Too many requests"}
-        with pytest.raises(DataFetchError, match="Too many requests"):
-            downloader.fetch(408065, "2024-01-02", "2024-01-02", Interval.DAY)
-
     def test_invalid_date_range_raises(self, downloader):
         with pytest.raises(ValueError, match="must not be after"):
             downloader.fetch(408065, "2024-01-31", "2024-01-01", Interval.DAY)
-
-    def test_column_count_mismatch_raises(self, downloader, mock_session):
-        """7 columns when oi=False expects 6 → DataFetchError."""
-        bad_candles = [
-            ["2024-01-02T09:15:00+0530", 100, 101, 99, 100, 5000, 99999]
-        ]
-        mock_session.get.return_value = _api_resp(bad_candles)
-        with pytest.raises(DataFetchError, match="column count"):
-            downloader.fetch(408065, "2024-01-02", "2024-01-02", Interval.MINUTE_1, oi=False)
 
     def test_deduplication(self, downloader, mock_session, sample_candles):
         """Duplicate candles from the API should be removed."""
@@ -235,9 +228,50 @@ class TestFetch:
         times = df["datetime"].tolist()
         assert times == sorted(times)
 
-    def test_network_error_raises_data_fetch_error(self, downloader, mock_session):
-        mock_session.get.side_effect = requests.ConnectionError("unreachable")
-        with pytest.raises(DataFetchError, match="Network error"):
+
+
+# ---------------------------------------------------------------------------
+# Retry rule: everything is retried until it succeeds — except a logout
+# ---------------------------------------------------------------------------
+
+_FAILURES = {
+    "network error":      lambda: requests.ConnectionError("connection reset"),
+    "timeout":            lambda: requests.Timeout("read timed out"),
+    "not JSON":           _not_json_resp,
+    "too many requests":  lambda: _error_resp("Too many requests", "NetworkException", 429),
+    "other API error":    lambda: _error_resp("Something went wrong", "GeneralException", 500),
+    "rejected request":   lambda: _error_resp("invalid from date", "InputException", 400),
+    "no data":            lambda: _json_resp({"status": "success", "data": None}),
+    "wrong column count": lambda: _api_resp([["2024-01-02T09:15:00+0530", 1, 2, 3]]),
+}
+
+
+class TestRetry:
+
+    @pytest.mark.parametrize("failure", _FAILURES.values(), ids=_FAILURES.keys())
+    def test_failure_is_retried_until_it_succeeds(
+        self, downloader, mock_session, sample_candles, failure
+    ):
+        mock_session.get.side_effect = [failure(), failure(), failure(), _api_resp(sample_candles)]
+        df = downloader.fetch(408065, "2024-01-02", "2024-01-02", Interval.MINUTE_1)
+        assert len(df) == len(sample_candles)
+        assert mock_session.get.call_count == 4
+
+    def test_logout_stops_the_download_at_once(self, downloader, mock_session):
+        mock_session.get.return_value = _error_resp(
+            "Incorrect `api_key` or `access_token`.", "TokenException", 403
+        )
+        with pytest.raises(DataFetchError, match="logged you out"):
+            downloader.fetch(*TestFetchMultiWindow._ARGS)  # three windows
+        assert mock_session.get.call_count == 1  # no retry, later windows never start
+
+    def test_close_cancels_a_download_that_is_still_retrying(self, downloader, mock_session):
+        def _get(*args, **kwargs):
+            downloader.close()  # as the web app's Log out does, from another thread
+            raise requests.ConnectionError("down")
+
+        mock_session.get.side_effect = _get
+        with pytest.raises(DataFetchError, match="cancelled"):
             downloader.fetch(408065, "2024-01-02", "2024-01-02", Interval.DAY)
 
 
@@ -267,7 +301,7 @@ class TestFetchMultiWindow:
             start = params["from"][:10]
             if remaining.get(start, 0) > 0:
                 remaining[start] -= 1
-                return _http_error_resp(500)
+                return _error_resp()
             return _api_resp([self._GOOD[start]])
 
         mock_session.get.side_effect = _get
@@ -283,32 +317,19 @@ class TestFetchMultiWindow:
         assert len(df) == 3
         assert mock_session.get.call_count == 3
 
-    def test_failed_window_is_retried_once(self, downloader, mock_session):
-        self._serve(mock_session, {"2024-03-01": 1})
+    def test_failing_window_is_retried_until_it_succeeds(self, downloader, mock_session):
+        self._serve(mock_session, {"2024-03-01": 5})
         df = downloader.fetch(*self._ARGS)
-        assert len(df) == 3
+        assert len(df) == 3  # no gap
+        assert mock_session.get.call_count == 3 + 5
 
-    def test_persistent_failure_raises_partial_data_error(self, downloader, mock_session):
-        self._serve(mock_session, {"2024-03-01": 2})
-        with pytest.raises(PartialDataError) as exc_info:
-            downloader.fetch(*self._ARGS)
-        err = exc_info.value
-        assert err.failed_ranges == [(date(2024, 3, 1), date(2024, 4, 29))]
-        assert len(err.partial_data) == 2
-        assert "2024-03-01" in str(err)
-
-    def test_partial_data_error_is_a_data_fetch_error(self):
+    def test_partial_data_error_is_still_importable_as_a_data_fetch_error(self):
         assert issubclass(PartialDataError, DataFetchError)
 
-    def test_all_windows_failing_raises_plain_error(self, downloader, mock_session):
-        mock_session.get.return_value = _http_error_resp(500)
-        with pytest.raises(DataFetchError, match="HTTP 500") as exc_info:
-            downloader.fetch(*self._ARGS)
-        assert not isinstance(exc_info.value, PartialDataError)
-
-    def test_http_403_mentions_expired_session(self, downloader, mock_session):
-        mock_session.get.return_value = _http_error_resp(403)
-        with pytest.raises(DataFetchError, match="expired"):
+    def test_logout_message_says_the_session_expired(self, downloader, mock_session):
+        # The web app keys its "log in again" message on the word "expired".
+        mock_session.get.return_value = _error_resp("Session expired", "TokenException", 403)
+        with pytest.raises(DataFetchError, match="session has expired"):
             downloader.fetch(*self._ARGS)
 
     def test_progress_reports_every_window(self, downloader, mock_session):

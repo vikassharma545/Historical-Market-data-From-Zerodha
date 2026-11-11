@@ -7,7 +7,7 @@ without a running Streamlit session.  The UI itself lives in :mod:`pyzdata._app`
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Tuple
 
 import pandas as pd
@@ -20,8 +20,8 @@ from .models import Interval
 
 EXCHANGES: List[str] = ["NSE", "BSE", "NFO", "BFO", "MCX", "NCO", "CDS"]
 
-#: Exchanges that list dated contracts.  They get the two-step picker
-#: (underlying → contract) and the open-interest option.
+#: Exchanges that list dated contracts.  They get the word-search contract
+#: picker and the open-interest option.
 DERIVATIVE_EXCHANGES = frozenset({"NFO", "BFO", "MCX", "NCO", "CDS"})
 
 EXCHANGE_HELP = (
@@ -73,6 +73,13 @@ MAIN_INTERVALS: List[str] = ["Day", "1 hour", "30 min", "15 min", "5 min", "1 mi
 def period_to_dates(label: str, today: date) -> Tuple[date, date]:
     """Turn a :data:`PERIODS` label into a ``(start, end)`` date pair."""
     return today - timedelta(days=PERIODS[label]), today
+
+
+def greeting(now: datetime) -> str:
+    """"Good morning" / "Good afternoon" / "Good evening" for the page header."""
+    if now.hour < 12:
+        return "Good morning"
+    return "Good afternoon" if now.hour < 17 else "Good evening"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -161,13 +168,14 @@ def friendly_error(message: str) -> str:
     # Network first: those messages also mention the step that was interrupted.
     if "network" in text or "connect" in text or "timed out" in text:
         return "Could not reach Zerodha. Check your internet connection and try again."
+    # TOTP before enctoken: a failed 2FA also says "the enctoken cookie was not set".
+    if "totp" in text or "2fa" in text or "twofa" in text:
+        return "Wrong TOTP code. Open your authenticator app and use the latest 6-digit code."
     if "enctoken" in text:
         return (
             "That enctoken has expired or is not valid. Log in to kite.zerodha.com "
             "again and copy a fresh one."
         )
-    if "totp" in text or "2fa" in text or "twofa" in text:
-        return "Wrong TOTP code. Open your authenticator app and use the latest 6-digit code."
     if "403" in text or "password" in text:
         return "Wrong User ID or password. Please check and try again."
     return message

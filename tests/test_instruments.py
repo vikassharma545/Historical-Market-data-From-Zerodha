@@ -145,6 +145,11 @@ class TestSearch:
         assert len(result) == 1
         assert result.iloc[0]["exchange"] == "NSE"
 
+    def test_exchange_filter_ignores_case(self, mock_session, config, instruments_csv_text):
+        # get_token() already forgave "nse"; search() returned nothing.
+        mgr = _loaded_manager(mock_session, config, instruments_csv_text)
+        assert len(mgr.search("NIFTY", exchange=" nse ")) == 1
+
     def test_no_match_returns_empty(self, mock_session, config, instruments_csv_text):
         mgr = _loaded_manager(mock_session, config, instruments_csv_text)
         result = mgr.search("ZZZNOTEXIST")

@@ -10,14 +10,29 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from pyzdata.exceptions import DataFetchError, PartialDataError
+from pyzdata.exceptions import DataFetchError
+from pyzdata.run_web import _SETTINGS
 
 pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 from pyzdata._app import _new_job  # noqa: E402
 
-_APP = str(Path(__file__).parent.parent / "pyzdata" / "_app.py")
+_ROOT = Path(__file__).parent.parent
+_APP = str(_ROOT / "pyzdata" / "_app.py")
+
+
+def test_launcher_and_checkout_settings_match():
+    """`pyzdata-web` passes flags; `streamlit run app.py` reads config.toml."""
+    tomllib = pytest.importorskip("tomllib")  # Python 3.11+
+    toml = tomllib.loads((_ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
+    flat = {
+        f"{section}.{name}": str(value).lower() if isinstance(value, bool) else str(value)
+        for section, options in toml.items()
+        for name, value in options.items()
+    }
+    assert flat == _SETTINGS
+    assert _SETTINGS["server.address"] == "localhost"
 
 
 class FakeClient:
@@ -66,6 +81,11 @@ def logged_in(client: FakeClient) -> AppTest:
     return at.run()
 
 
+def rows_shown(at: AppTest) -> str:
+    """The row count from the result caption: "3 rows · 01 Jan 2024 → …"."""
+    return next(c.value for c in at.caption if " rows · " in c.value).split(" rows")[0]
+
+
 def button(at: AppTest, label_start: str):
     return next(b for b in at.button if b.label.startswith(label_start))
 
@@ -97,9 +117,9 @@ class TestDownloader:
         button(at, "Download RELIANCE").click().run()
 
         assert not at.exception
-        assert at.subheader[0].value == "RELIANCE · Day"
+        assert at.header[0].value == "RELIANCE"
         assert any("fetched from Zerodha in" in c.value for c in at.caption)
-        assert at.metric[0].value == "3"
+        assert rows_shown(at) == "3"
         assert client.requests[0]["oi"] is False
 
     def test_derivatives_use_word_search_and_open_interest(self):
@@ -113,30 +133,33 @@ class TestDownloader:
         assert not at.exception
         assert client.requests[0]["oi"] is True
 
-    def test_partial_download_warns_but_keeps_the_data(self):
+    def test_logout_is_explained(self):
         def fail():
-            raise PartialDataError(
-                "1 of 2 date ranges failed",
-                partial_data=candles(2),
-                failed_ranges=[(pd.Timestamp("2024-03-01").date(), pd.Timestamp("2024-04-29").date())],
+            raise DataFetchError(
+                "Zerodha logged you out while fetching RELIANCE: your session has expired "
+                "(Incorrect `api_key` or `access_token`.). Log in again."
             )
 
         at = logged_in(FakeClient(get_data=fail))
         at.selectbox(key="symbol_NSE").select("RELIANCE").run()
         button(at, "Download RELIANCE").click().run()
 
-        assert "01 Mar 2024" in at.warning[0].value
-        assert at.metric[0].value == "2"
+        assert "logged you out" in at.error[0].value
 
-    def test_expired_session_is_explained(self):
+    def test_unexpected_error_is_shown_and_the_page_recovers(self):
+        """Used to leave the page stuck on a disabled "Downloading …" button."""
         def fail():
-            raise DataFetchError("HTTP 403 fetching RELIANCE: your Zerodha session has expired")
+            raise RuntimeError("something nobody expected")
 
         at = logged_in(FakeClient(get_data=fail))
         at.selectbox(key="symbol_NSE").select("RELIANCE").run()
         button(at, "Download RELIANCE").click().run()
+        at.run()  # any later interaction
 
-        assert "session has expired" in at.error[0].value
+        assert not at.exception
+        assert "something nobody expected" in at.error[0].value
+        assert "job" not in at.session_state
+        assert not button(at, "Download RELIANCE").disabled
 
     def test_no_data_is_explained(self):
         at = logged_in(FakeClient(get_data=lambda: candles(0)))
@@ -178,8 +201,8 @@ class TestDownloadSurvivesReruns:
         at.run()  # a rerun that is not a click on Download
 
         assert not at.exception
-        assert at.subheader[0].value == "RELIANCE · Day"
-        assert at.metric[0].value == "4"
+        assert at.header[0].value == "RELIANCE"
+        assert rows_shown(at) == "4"
         assert client.requests == []  # attached to the running job; nothing fetched again
 
     def test_clicking_download_again_mid_download_does_not_fetch_twice(self):
@@ -191,9 +214,9 @@ class TestDownloadSurvivesReruns:
 
         assert not at.exception
         assert client.requests == []
-        assert at.metric[0].value == "4"
+        assert rows_shown(at) == "4"
 
-    def test_download_button_is_disabled_while_downloading(self):
+    def test_download_button_is_usable_again_after_the_job_finishes(self):
         def work(report):
             time.sleep(1.0)
             return candles(4)

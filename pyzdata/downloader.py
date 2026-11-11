@@ -1,38 +1,37 @@
 """Historical OHLCV candle downloader.
 
 The downloader splits a date range into the largest windows the Kite API
-accepts for the requested interval and fetches them in parallel using a
-thread pool.  Daily candles fit ~5 years into one request; 1-minute candles
-need one request per 60 days.
+accepts for the requested interval and fetches them one after another.
+Daily candles fit ~5 years into one request; 1-minute candles need one
+request per 60 days.
 
 Design decisions
 ----------------
 * Window size depends on the interval (see ``_max_days``).  Earlier versions
   always used calendar months, which cost 60 requests for 5 years of daily
   data where a single request is enough.
-* A failed window is never dropped silently.  It is retried once; if it
-  still fails the caller gets a :class:`~pyzdata.exceptions.PartialDataError`
-  that names the missing ranges and carries the rows that did download.
+* Every window is retried until it succeeds (see ``_fetch_window``).
+  Network errors, timeouts, Kite API errors, "Too many requests" and
+  garbled responses all pass, so the download waits (jittered) and tries
+  again.  The one exception is a ``TokenException``: Zerodha has logged the
+  account out, no retry can succeed, and the download stops with a
+  :class:`~pyzdata.exceptions.DataFetchError`.
+* Windows are fetched sequentially.  The rate limit (3 requests/s) is the
+  real ceiling, and a plain loop keeps Ctrl-C and cancelling trivial.
 * Timezone handling: Zerodha returns IST timestamps (``+05:30`` suffix).
-  We parse them as UTC-aware, convert to IST, then strip the tz-info to
-  produce naive IST timestamps — consistent with how most Indian trading
-  applications store candle data.
-* Column count is validated *before* assigning names.  The original code did
-  ``data.columns = columns`` without checking width, which silently
-  misassigned columns if the API response shape changed.
+  We convert to IST, then strip the tz-info to produce naive IST timestamps
+  — consistent with how most Indian trading applications store candle data.
+* Column count is validated *before* assigning names, so a change in the
+  API's response shape fails loudly instead of misassigning columns.
 * Deduplication uses ``subset=["datetime"]`` so only the first occurrence of
-  each timestamp is kept.  The original code deduped across all columns,
-  which could retain two rows for the same candle if any numeric value differed
-  slightly (floating-point jitter).
-* ``_fetch_all`` returns results in *window order*, not completion order, so
-  the final ``pd.concat`` is always chronological.
+  each timestamp is kept, regardless of floating-point jitter in the values.
 """
 
 from __future__ import annotations
 
 import logging
+import random
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Callable, Dict, Generator, List, Optional, Tuple
 
@@ -40,7 +39,7 @@ import pandas as pd
 import requests
 
 from .config import Config
-from .exceptions import DataFetchError, PartialDataError
+from .exceptions import DataFetchError
 from .instruments import InstrumentManager
 from .models import Interval
 
@@ -68,7 +67,6 @@ _MAX_DAYS_PER_REQUEST: Dict[Interval, int] = {
     Interval.HOUR_4:    400,
     Interval.DAY:       2000,
 }
-
 
 def _max_days(interval: Interval) -> int:
     # Unknown intervals get the smallest window — slower, but always accepted.
@@ -115,6 +113,11 @@ class DataDownloader:
         self._instruments = instruments
         self._config = config
         self._throttle = _Throttle(config.rate_limit_per_second)
+        self._closed = False
+
+    def close(self) -> None:
+        """Make a download that is still retrying give up (after its current wait)."""
+        self._closed = True
 
     # ---------------------------------------------------------------- public
 
@@ -130,8 +133,7 @@ class DataDownloader:
         """Download candles for *instrument_token* over [start_date, end_date].
 
         The date range is split into the largest windows the API allows for
-        *interval* and fetched in parallel (up to ``config.max_workers``
-        threads).
+        *interval*; each window is retried until it succeeds.
 
         Parameters
         ----------
@@ -143,6 +145,8 @@ class DataDownloader:
             :class:`~pyzdata.models.Interval` candle granularity.
         oi:
             When ``True``, include an ``open_interest`` column.
+        progress_callback:
+            Called as ``callback(done, total)`` after each window.
 
         Returns
         -------
@@ -156,12 +160,11 @@ class DataDownloader:
         ValueError
             If ``start_date > end_date``.
         DataFetchError
-            On HTTP or API-level failures.
-        PartialDataError
-            When only some date ranges failed.  ``exc.partial_data`` holds
-            the rows that were fetched, ``exc.failed_ranges`` the gaps.
+            Only when Zerodha logged the account out (``TokenException``) or
+            :meth:`close` cancelled the download.  Every other failure is
+            retried until it succeeds.
         """
-        from_dt =pd.to_datetime(start_date).normalize()
+        from_dt = pd.to_datetime(start_date).normalize()
         to_dt   = pd.to_datetime(end_date).normalize()
 
         if from_dt > to_dt:
@@ -178,23 +181,18 @@ class DataDownloader:
             symbol, from_dt.date(), to_dt.date(), interval.value, len(windows),
         )
 
-        frames, failed = self._fetch_all(
-            instrument_token, windows, interval, oi, symbol, progress_callback
-        )
+        frames = []
+        for done, (start, end) in enumerate(windows, start=1):
+            frame = self._fetch_window(instrument_token, start, end, interval, oi, symbol)
+            if not frame.empty:
+                frames.append(frame)
+            if progress_callback:
+                progress_callback(done, len(windows))
 
         if frames:
             df = _clean(pd.concat(frames, ignore_index=True), from_dt, to_dt)
         else:
             df = pd.DataFrame(columns=["tradingsymbol"] + _expected_cols(oi))
-
-        if failed:
-            failed_ranges = [(s.date(), e.date()) for s, e in failed]
-            missing = ", ".join(f"{s} → {e}" for s, e in failed_ranges)
-            raise PartialDataError(
-                f"{len(failed)} of {len(windows)} date ranges failed for {symbol}: {missing}",
-                partial_data=df,
-                failed_ranges=failed_ranges,
-            )
 
         if df.empty:
             logger.warning("No data returned for %s %s→%s", symbol, from_dt.date(), to_dt.date())
@@ -203,58 +201,6 @@ class DataDownloader:
         return df
 
     # -------------------------------------------------------------- private
-
-    def _fetch_all(
-        self,
-        token: int,
-        windows: List[Tuple[pd.Timestamp, pd.Timestamp]],
-        interval: Interval,
-        oi: bool,
-        symbol: str,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
-    ) -> Tuple[List[pd.DataFrame], List[Tuple[pd.Timestamp, pd.Timestamp]]]:
-        """Fetch all windows in parallel and return ``(frames, failed_windows)``.
-
-        Raises the first :class:`DataFetchError` when *every* window failed —
-        that is an outage or an expired session, not a gap in the data.
-        """
-        # Pre-allocate result slots to preserve chronological order after
-        # out-of-order parallel completion.
-        results: List[Optional[pd.DataFrame]] = [None] * len(windows)
-        errors: Dict[int, DataFetchError] = {}
-        completed = 0
-
-        with ThreadPoolExecutor(max_workers=self._config.max_workers) as pool:
-            future_to_idx = {
-                pool.submit(self._fetch_window, token, s, e, interval, oi, symbol): i
-                for i, (s, e) in enumerate(windows)
-            }
-            # Results are consumed on this thread only, so the progress
-            # callback never runs concurrently.
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                try:
-                    results[idx] = future.result()
-                except DataFetchError as exc:
-                    logger.warning("Window %d failed, will retry: %s", idx, exc)
-                    errors[idx] = exc
-
-                completed += 1
-                if progress_callback:
-                    progress_callback(completed, len(windows))
-
-        if len(errors) == len(windows):
-            raise errors[min(errors)]
-
-        for idx in sorted(errors):
-            try:
-                results[idx] = self._fetch_window(token, *windows[idx], interval, oi, symbol)
-                del errors[idx]
-            except DataFetchError as exc:
-                logger.error("Window %d failed again: %s", idx, exc)
-
-        frames = [r for r in results if r is not None and not r.empty]
-        return frames, [windows[i] for i in sorted(errors)]
 
     def _fetch_window(
         self,
@@ -265,7 +211,13 @@ class DataDownloader:
         oi: bool,
         symbol: str,
     ) -> pd.DataFrame:
-        """Fetch one date window from the Kite API."""
+        """Fetch one date window, retrying every failure except a logout.
+
+        * ``TokenException``  → stop: the account is logged out.
+        * "Too many requests" → wait 0.5–3 s, retry.
+        * other Kite error    → warn, wait 1–5 s, retry.
+        * any exception       → warn, wait 1 s up to 15 s (grows per attempt), retry.
+        """
         url = self._URL.format(
             root=self._config.root_url, token=token, interval=interval.value
         )
@@ -275,72 +227,76 @@ class DataDownloader:
             "to":   to_dt.strftime("%Y-%m-%d 23:59:59"),
             "oi":   int(oi),
         }
-        logger.debug("GET %s | from=%s to=%s", url, params["from"], params["to"])
+        span = f"{from_dt.date()} → {to_dt.date()}"
 
-        self._throttle.wait()
-        try:
-            resp = self._session.get(
-                url,
-                params=params,
-                headers=self._headers,
-                timeout=self._config.request_timeout,
-            )
-            resp.raise_for_status()
-        except requests.HTTPError as exc:
-            if exc.response.status_code in (401, 403):
-                raise DataFetchError(
-                    f"HTTP {exc.response.status_code} fetching {symbol}: your Zerodha "
-                    "session has expired or the enctoken is invalid. Log in again."
-                ) from exc
-            raise DataFetchError(
-                f"HTTP {exc.response.status_code} fetching {symbol} "
-                f"({from_dt.date()} → {to_dt.date()})"
-            ) from exc
-        except requests.RequestException as exc:
-            raise DataFetchError(
-                f"Network error fetching {symbol}: {exc}"
-            ) from exc
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                logger.debug("GET %s | from=%s to=%s", url, params["from"], params["to"])
+                self._throttle.wait()
+                resp = self._session.get(
+                    url,
+                    params=params,
+                    headers=self._headers,
+                    timeout=self._config.request_timeout,
+                )
+                response = resp.json()  # Kite answers in JSON, errors included
 
-        payload = resp.json()
-        if payload.get("status") != "success":
-            raise DataFetchError(
-                f"API error for {symbol}: {payload.get('message', 'unknown error')}"
-            )
+                if response.get("status") == "error":
+                    msg = response.get("message", "")
+                    if response.get("error_type") == "TokenException":
+                        # The account was logged out: no retry can succeed.
+                        raise DataFetchError(
+                            f"Zerodha logged you out while fetching {symbol}: your session "
+                            f"has expired ({msg or 'TokenException'}). Log in again."
+                        )
+                    if msg == "Too many requests":
+                        delay = random.uniform(0.5, 3)
+                    else:
+                        logger.warning("API error for %s %s (attempt %d): %s",
+                                       symbol, span, attempt, msg)
+                        delay = random.uniform(1, 5)
+                else:
+                    return _to_frame(response["data"]["candles"], oi, symbol, span)
 
-        candles = payload.get("data", {}).get("candles", [])
-        if not candles:
-            logger.debug(
-                "No candles for %s %s→%s", symbol, from_dt.date(), to_dt.date()
-            )
-            return pd.DataFrame()
+            except DataFetchError:
+                raise  # logged out — see above
+            except Exception as exc:  # network, timeout, not JSON, garbled candles …
+                logger.warning("Fetch error for %s %s (attempt %d): %s",
+                               symbol, span, attempt, exc)
+                delay = random.uniform(1, min(3 * attempt, 15))
 
-        cols = _expected_cols(oi)
-
-        # Validate column count before assignment to prevent silent misalignment.
-        actual_width = len(candles[0])
-        if actual_width != len(cols):
-            raise DataFetchError(
-                f"Unexpected column count from Kite API: got {actual_width}, "
-                f"expected {len(cols)}. "
-                f"Check whether the 'oi' parameter matches the instrument type."
-            )
-
-        df = pd.DataFrame(candles, columns=cols)
-        df = _parse_datetime(df)
-        df["tradingsymbol"] = symbol
-
-        # Re-order: tradingsymbol first, then the rest.
-        df = df[["tradingsymbol"] + cols]
-
-        logger.debug(
-            "%d rows for %s %s→%s", len(df), symbol, from_dt.date(), to_dt.date()
-        )
-        return df
+            time.sleep(delay)  # time.sleep, not Event.wait: Ctrl-C must work on Windows
+            if self._closed:
+                raise DataFetchError(f"Download of {symbol} cancelled")
 
 
 # ---------------------------------------------------------------------------
 # Module-level pure helpers (easily unit-testable without a class instance)
 # ---------------------------------------------------------------------------
+
+def _to_frame(candles: list, oi: bool, symbol: str, span: str) -> pd.DataFrame:
+    """Turn one window's raw candles into a frame: ``tradingsymbol`` first."""
+    if not candles:
+        logger.debug("No candles for %s %s", symbol, span)
+        return pd.DataFrame()
+
+    cols = _expected_cols(oi)
+    # Validate column count before assignment to prevent silent misalignment.
+    actual_width = len(candles[0])
+    if actual_width != len(cols):
+        raise ValueError(
+            f"Unexpected column count from Kite API: got {actual_width}, "
+            f"expected {len(cols)}. "
+            f"Check whether the 'oi' parameter matches the instrument type."
+        )
+
+    df = _parse_datetime(pd.DataFrame(candles, columns=cols))
+    df["tradingsymbol"] = symbol
+    logger.debug("%d rows for %s %s", len(df), symbol, span)
+    return df[["tradingsymbol"] + cols]
+
 
 def _parse_datetime(df: pd.DataFrame) -> pd.DataFrame:
     """Parse the datetime column and normalise to naive IST timestamps.

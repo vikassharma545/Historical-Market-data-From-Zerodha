@@ -5,6 +5,42 @@ All notable changes to PyZData are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Web app restyled as a trading desk:** warm grey page with white cards, one orange accent
+  for actions, a dark tab for the chosen exchange / period / interval, a greeting with the
+  date in IST, and a result card that leads with the last close in monospace, its change
+  over the period in green or red, and a matching price line. Fonts are the ones already
+  installed — nothing is fetched from a font server
+- **Downloads retry until they succeed.** Network errors, timeouts, "Too many requests",
+  Kite API errors and unreadable responses are retried with a short random wait
+  (0.5–3 s for rate limits, 1–5 s for API errors, up to 15 s for other failures). Only a
+  `TokenException` — Zerodha logged the account out — stops a download, with a
+  `DataFetchError`. `PyZData.close()` (the web app's Log out) cancels a retrying download
+- Date windows are fetched one at a time instead of on a thread pool; `max_workers` and
+  `PYZDATA_MAX_WORKERS` are ignored (the field stays so existing code keeps working)
+- `PartialDataError` is no longer raised (kept for imports); the CLI no longer exits with 2
+  for partial data, and the web app's partial-data warning is gone
+- The library no longer configures logging unless `log_level` / `PYZDATA_LOG_LEVEL` is
+  set; the default changed from `WARNING` to unset
+- The CLI prompts for a missing `--password` / `--totp` instead of requiring them as flags
+- `pyzdata-web` and `streamlit run app.py` listen on localhost only and send no usage
+  statistics; both now read the same settings
+- Build requires `setuptools>=77`; the publish workflow runs the tests first and pins the
+  PyPI action to a commit
+
+### Fixed
+- Web app: an unexpected error left the page stuck on a disabled "Downloading …" button
+- Non-JSON or malformed Kite responses escaped as raw `JSONDecodeError` / `AttributeError`
+  / `KeyError` instead of being retried (downloads) or raised as `AuthenticationError` (login)
+- CLI `--verbose` showed no library logs, and apps with their own logging setup got every
+  library message twice
+- CLI printed a traceback for an unreadable date or a start date after the end date
+- `search_instruments(..., exchange="nse")` returned nothing (exchange is now case-insensitive)
+- Web app told credential-login users their *enctoken* was invalid when the TOTP was wrong
+- `Config` now rejects `request_timeout <= 0` and `max_retries < 0` up front
+
 ## [1.1.0] - 2026-09-20
 
 ### Added

@@ -31,15 +31,9 @@ class DataFetchError(PyZDataError):
 
 
 class PartialDataError(DataFetchError):
-    """Raised when some — but not all — date ranges of a download failed.
+    """No longer raised: downloads now retry each date range until it succeeds.
 
-    The rows that *were* fetched are kept on :attr:`partial_data` so callers
-    can decide whether incomplete data is still useful:
-
-        try:
-            df = client.get_data(token, start, end, Interval.MINUTE_1)
-        except PartialDataError as exc:
-            df = exc.partial_data          # has gaps at exc.failed_ranges
+    Kept so code that imports or catches it keeps working.
     """
 
     def __init__(self, message, partial_data, failed_ranges):

@@ -3,7 +3,10 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 from pyzdata.config import Config
+from pyzdata.exceptions import ConfigurationError
 
 
 class TestConfigDefaults:
@@ -16,7 +19,7 @@ class TestConfigDefaults:
         assert cfg.max_workers == 4
         assert cfg.instruments_cache_ttl_hours == 24.0
         assert cfg.instruments_cache_path is None
-        assert cfg.log_level == "WARNING"
+        assert cfg.log_level is None  # leave logging to the application
 
     def test_default_urls(self):
         cfg = Config()
@@ -46,11 +49,6 @@ class TestConfigFromEnv:
         with patch.dict(os.environ, {"PYZDATA_MAX_RETRIES": "10"}):
             cfg = Config.from_env()
             assert cfg.max_retries == 10
-
-    def test_reads_max_workers_from_env(self):
-        with patch.dict(os.environ, {"PYZDATA_MAX_WORKERS": "16"}):
-            cfg = Config.from_env()
-            assert cfg.max_workers == 16
 
     def test_reads_timeout_from_env(self):
         with patch.dict(os.environ, {"PYZDATA_TIMEOUT": "60"}):
@@ -87,6 +85,17 @@ class TestConfigFromEnv:
         clean = {k: v for k, v in os.environ.items() if not k.startswith("PYZDATA_")}
         with patch.dict(os.environ, clean, clear=True):
             cfg = Config.from_env()
-            assert cfg.max_retries == 5
-            assert cfg.max_workers == 4
-            assert cfg.log_level == "WARNING"
+            assert cfg == Config()
+
+
+class TestValidation:
+
+    @pytest.mark.parametrize("bad", [{"request_timeout": 0}, {"max_retries": -1}])
+    def test_values_that_would_fail_every_retry_are_rejected(self, bad):
+        with pytest.raises(ConfigurationError):
+            Config(**bad)
+
+    def test_bad_env_value_is_rejected(self):
+        with patch.dict(os.environ, {"PYZDATA_TIMEOUT": "0"}):
+            with pytest.raises(ConfigurationError, match="request_timeout"):
+                Config.from_env()

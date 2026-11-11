@@ -1,6 +1,6 @@
 """Tests for pyzdata._web_helpers — the Streamlit-free half of the web app."""
 
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import pytest
@@ -16,6 +16,7 @@ from pyzdata._web_helpers import (
     contract_table,
     file_stem,
     friendly_error,
+    greeting,
     instrument_options,
     period_to_dates,
     search_contracts,
@@ -143,6 +144,18 @@ class TestSearchContracts:
         assert len(search_contracts(table, "nifty", limit=2)) == 2
 
 
+# ── greeting ────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("hour, expected", [
+    (0, "Good morning"), (11, "Good morning"),
+    (12, "Good afternoon"), (16, "Good afternoon"),
+    (17, "Good evening"), (23, "Good evening"),
+])
+def test_greeting_follows_the_clock(hour, expected):
+    assert greeting(datetime(2026, 11, 11, hour, 30)) == expected
+
+
 # ── friendly_error ──────────────────────────────────────────────────────────
 
 
@@ -150,6 +163,9 @@ class TestFriendlyError:
     @pytest.mark.parametrize("raw, expected", [
         ("Login failed (HTTP 403). Check your user_id and password.", "Wrong User ID or password"),
         ("2FA rejected by Kite: Invalid TOTP", "TOTP"),
+        # Mentions the enctoken, but the user typed a TOTP, not an enctoken.
+        ("2FA succeeded but the enctoken cookie was not set. "
+         "Your TOTP may be incorrect or expired.", "Wrong TOTP code"),
         ("Invalid or expired enctoken (HTTP 403).", "enctoken has expired"),
         ("Network error during login: timed out", "internet connection"),
         ("Network error during 2FA: reset", "internet connection"),

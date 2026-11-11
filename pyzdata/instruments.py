@@ -1,6 +1,6 @@
 """Zerodha instruments master management with transparent disk caching.
 
-The instruments CSV (≈50 MB, ~10 k rows) is downloaded once and cached at
+The instruments CSV (≈10 MB, ~130 k rows) is downloaded once and cached at
 ``~/.pyzdata/instruments.csv`` (or a user-specified path).  On subsequent
 runs the cached file is reused until it exceeds ``config.instruments_cache_ttl_hours``
 (default 24 h), avoiding a slow network download on every script execution.
@@ -147,7 +147,7 @@ class InstrumentManager:
             query, case=False, na=False, regex=False
         )
         if exchange:
-            mask &= self._df[_EXCHANGE_COL] == exchange
+            mask &= self._df[_EXCHANGE_COL] == exchange.strip().upper()
         return self._df[mask].reset_index(drop=True)
 
     # -------------------------------------------------------------- private

@@ -32,6 +32,4 @@ jobs:
           pytest
 
       - name: Run ruff
-        run: |
-          pip install ruff
-          ruff check pyzdata/ tests/
+        run: ruff check pyzdata/ tests/
