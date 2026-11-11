@@ -24,12 +24,13 @@ Usage examples::
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 import os
 import sys
 
 from . import Interval, PyZData
-from .exceptions import PartialDataError, PyZDataError
+from .exceptions import PyZDataError
 
 _ENCTOKEN_ENV = "PYZDATA_ENCTOKEN"
 
@@ -46,8 +47,8 @@ def _add_auth_args(parser: argparse.ArgumentParser) -> None:
         help=f"Zerodha enctoken (default: ${_ENCTOKEN_ENV})",
     )
     auth.add_argument("--user-id", metavar="ID", help="Zerodha user ID")
-    parser.add_argument("--password", metavar="PW", help="Password (required with --user-id)")
-    parser.add_argument("--totp", metavar="CODE", help="TOTP code (required with --user-id)")
+    parser.add_argument("--password", metavar="PW", help="Password (prompted if omitted)")
+    parser.add_argument("--totp", metavar="CODE", help="TOTP code (prompted if omitted)")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -120,13 +121,12 @@ def main() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # ---------- auth validation ----------
-    if getattr(args, "user_id", None) and not (
-        getattr(args, "password", None) and getattr(args, "totp", None)
-    ):
-        parser.error("--password and --totp are required when using --user-id")
-
     try:
+        if args.user_id:
+            # Prompted, so they need not sit in shell history or the process list.
+            args.password = args.password or getpass.getpass("Zerodha password: ")
+            args.totp = args.totp or input("TOTP code: ").strip()
+
         client = _build_client(args)
 
         if args.command == "search":
@@ -134,7 +134,9 @@ def main() -> None:
         else:
             _handle_download(client, args)
 
-    except PyZDataError as exc:
+    except EOFError:  # no terminal to prompt on
+        parser.error("--password and --totp are required when using --user-id")
+    except (PyZDataError, ValueError) as exc:  # ValueError: unreadable or reversed dates
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:
@@ -155,14 +157,7 @@ def _handle_search(client: PyZData, args: argparse.Namespace) -> None:
 def _handle_download(client: PyZData, args: argparse.Namespace) -> None:
     interval = next(i for i in Interval if i.value == args.interval)
     token = client.get_instrument_token(args.symbol, args.exchange)
-    incomplete = False
-    try:
-        df = client.get_data(token, args.start, args.end, interval, oi=args.oi)
-    except PartialDataError as exc:
-        # Keep what was fetched, but make the gaps impossible to miss.
-        print(f"Warning: {exc}", file=sys.stderr)
-        df = exc.partial_data
-        incomplete = True
+    df = client.get_data(token, args.start, args.end, interval, oi=args.oi)
 
     if df.empty:
         print("No data returned for the specified parameters.", file=sys.stderr)
@@ -173,9 +168,6 @@ def _handle_download(client: PyZData, args: argparse.Namespace) -> None:
         print(f"Saved {len(df):,} rows to {args.output}")
     else:
         print(df.to_string())
-
-    if incomplete:
-        sys.exit(2)
 
 
 def _build_client(args: argparse.Namespace) -> PyZData:

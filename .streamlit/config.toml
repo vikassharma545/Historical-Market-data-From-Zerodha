@@ -1,19 +1,47 @@
-# Kite-like look: white page, grey text, blue accent, sharp corners.
-# Keep in sync with _THEME in pyzdata/run_web.py (used by `pyzdata-web`).
-[theme]
-base="light"
-primaryColor="#387ed1"
-backgroundColor="#ffffff"
-secondaryBackgroundColor="#f6f7f9"
-textColor="#444444"
-linkColor="#387ed1"
-borderColor="#e0e0e0"
-baseRadius="4px"
+# Must match _SETTINGS in pyzdata/run_web.py (used by `pyzdata-web`) —
+# tests/test_app_smoke.py checks that they do.
+
+[server]
+# This computer only. Remove to serve the app to other machines — but the
+# login form then travels over plain HTTP.
+address="localhost"
+
+[browser]
+gatherUsageStats=false
+
+[client]
+toolbarMode="minimal"
+showSidebarNavigation=false
 
 [runner]
 magicEnabled=false
 fastReruns=false
 
-[client]
-showSidebarNavigation=false
-toolbarMode="viewer"
+# Trading-desk look: warm grey page, white cards, near-black ink, one
+# orange accent for actions, green / red only for up / down.
+[theme]
+base="light"
+primaryColor="#e0662a"
+backgroundColor="#f6f5f3"
+secondaryBackgroundColor="#faf9f7"
+textColor="#1c1b1a"
+borderColor="#e6e3de"
+showWidgetBorder=true
+linkColor="#24529e"
+blueColor="#24529e"
+orangeColor="#e0662a"
+greenColor="#0b7a52"
+greenTextColor="#0b7a52"
+redColor="#c42a48"
+redTextColor="#c42a48"
+grayColor="#6b6761"
+grayTextColor="#6b6761"
+dataframeHeaderBackgroundColor="#faf9f7"
+# Installed fonts only — nothing is fetched from a font CDN.
+font="Inter, Segoe UI, system-ui, sans-serif"
+codeFont="JetBrains Mono, Cascadia Mono, SF Mono, Consolas, monospace"
+baseFontSize=14
+headingFontSizes='["1.5rem","1.25rem","1rem"]'
+metricValueFontSize="2.5rem"
+metricValueFontWeight=400
+baseRadius="4px"

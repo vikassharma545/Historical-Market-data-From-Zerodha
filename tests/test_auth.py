@@ -74,6 +74,20 @@ class TestLoginWithCredentials:
         with pytest.raises(AuthenticationError, match="Invalid credentials"):
             auth.login_with_credentials("AB1234", "bad", "000000")
 
+    def test_step1_html_page_raises_authentication_error(self, auth, mock_session):
+        page = _resp(200)
+        page.json.side_effect = requests.JSONDecodeError("Expecting value", "<html>", 0)
+        mock_session.post.return_value = page
+
+        with pytest.raises(AuthenticationError, match="Login rejected"):
+            auth.login_with_credentials("AB1234", "pw", "000000")
+
+    def test_step1_without_request_id_raises_authentication_error(self, auth, mock_session):
+        mock_session.post.return_value = _resp(200, {"status": "success", "data": {}})
+
+        with pytest.raises(AuthenticationError, match="request_id"):
+            auth.login_with_credentials("AB1234", "pw", "000000")
+
     def test_step2_http_error_raises(self, auth, mock_session):
         mock_session.post.side_effect = [self._step1_ok(), _resp(401)]
 

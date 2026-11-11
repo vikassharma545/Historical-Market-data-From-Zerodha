@@ -185,23 +185,41 @@ class TestEnctokenFromEnvironment:
             _build_parser().parse_args(self._ARGS)
 
 
-class TestPartialDownload:
+class TestBadDates:
 
     @patch("pyzdata.cli._build_client")
-    @patch("sys.argv", TestMainErrorPaths._DOWNLOAD_ARGS + ["-o", "out.csv"])
-    def test_partial_data_is_saved_and_exits_2(self, mock_build, tmp_path, monkeypatch, capsys):
-        import pandas as pd
-
-        from pyzdata.exceptions import PartialDataError
-
-        monkeypatch.chdir(tmp_path)
-        partial = pd.DataFrame({"datetime": ["2024-01-02"], "close": [100.0]})
-        mock_build.return_value.get_data.side_effect = PartialDataError(
-            "1 of 3 date ranges failed", partial_data=partial, failed_ranges=[]
+    @patch("sys.argv", TestMainErrorPaths._DOWNLOAD_ARGS)
+    def test_unreadable_or_reversed_dates_print_an_error_not_a_traceback(self, mock_build, capsys):
+        mock_build.return_value.get_data.side_effect = ValueError(
+            "start_date '2024-06-30' must not be after end_date '2024-01-01'"
         )
         with pytest.raises(SystemExit) as exc_info:
             main()
 
+        assert exc_info.value.code == 1
+        assert capsys.readouterr().err.startswith("Error: start_date")
+
+
+class TestPasswordPrompt:
+
+    _ARGS = ["pyzdata", "search", "--user-id", "AB1234", "-q", "NIFTY"]
+
+    @patch("pyzdata.cli._handle_search")
+    @patch("pyzdata.cli.PyZData")
+    def test_missing_password_and_totp_are_prompted(self, mock_client, _search, monkeypatch):
+        monkeypatch.setattr("sys.argv", self._ARGS)
+        monkeypatch.setattr("pyzdata.cli.getpass.getpass", lambda prompt: "secret")
+        monkeypatch.setattr("builtins.input", lambda prompt: " 123456 ")
+        main()
+        mock_client.assert_called_once_with(user_id="AB1234", password="secret", totp="123456")
+
+    def test_no_terminal_to_prompt_on_is_a_usage_error(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", self._ARGS + ["--password", "pw"])
+
+        def no_stdin(prompt):
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", no_stdin)
+        with pytest.raises(SystemExit) as exc_info:
+            main()
         assert exc_info.value.code == 2
-        assert (tmp_path / "out.csv").exists()
-        assert "1 of 3 date ranges failed" in capsys.readouterr().err

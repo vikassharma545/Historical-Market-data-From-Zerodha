@@ -17,18 +17,46 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Kite-like look: white page, grey text, blue accent, sharp corners.
 # Passed as flags because an installed package has no .streamlit/config.toml.
-# Keep in sync with .streamlit/config.toml (used by `streamlit run app.py`).
-_THEME = {
-    "base": "light",
-    "primaryColor": "#387ed1",
-    "backgroundColor": "#ffffff",
-    "secondaryBackgroundColor": "#f6f7f9",
-    "textColor": "#444444",
-    "linkColor": "#387ed1",
-    "borderColor": "#e0e0e0",
-    "baseRadius": "4px",
+# Must match .streamlit/config.toml (used by `streamlit run app.py`) —
+# tests/test_app_smoke.py checks that they do.
+_SETTINGS = {
+    # This computer only: the login form must not reach the rest of the
+    # network over plain HTTP.  Streamlit's default listens everywhere.
+    "server.address": "localhost",
+    "browser.gatherUsageStats": "false",
+    # An end-user app: no developer menu, no page list, no magic.
+    "client.toolbarMode": "minimal",
+    "client.showSidebarNavigation": "false",
+    "runner.magicEnabled": "false",
+    "runner.fastReruns": "false",
+    # Trading-desk look: warm grey page, white cards, near-black ink, one
+    # orange accent for actions, green / red only for up / down.
+    "theme.base": "light",
+    "theme.primaryColor": "#e0662a",
+    "theme.backgroundColor": "#f6f5f3",
+    "theme.secondaryBackgroundColor": "#faf9f7",
+    "theme.textColor": "#1c1b1a",
+    "theme.borderColor": "#e6e3de",
+    "theme.showWidgetBorder": "true",
+    "theme.linkColor": "#24529e",
+    "theme.blueColor": "#24529e",
+    "theme.orangeColor": "#e0662a",
+    "theme.greenColor": "#0b7a52",
+    "theme.greenTextColor": "#0b7a52",
+    "theme.redColor": "#c42a48",
+    "theme.redTextColor": "#c42a48",
+    "theme.grayColor": "#6b6761",
+    "theme.grayTextColor": "#6b6761",
+    "theme.dataframeHeaderBackgroundColor": "#faf9f7",
+    # Installed fonts only — nothing is fetched from a font CDN.
+    "theme.font": "Inter, Segoe UI, system-ui, sans-serif",
+    "theme.codeFont": "JetBrains Mono, Cascadia Mono, SF Mono, Consolas, monospace",
+    "theme.baseFontSize": "14",
+    "theme.headingFontSizes": '["1.5rem","1.25rem","1rem"]',
+    "theme.metricValueFontSize": "2.5rem",
+    "theme.metricValueFontWeight": "400",
+    "theme.baseRadius": "4px",
 }
 
 
@@ -50,9 +78,7 @@ def main() -> None:
         subprocess.run(
             [
                 sys.executable, "-m", "streamlit", "run", str(app_file),
-                # Hide Streamlit's developer menu — this is an end-user app.
-                "--client.toolbarMode", "minimal",
-                *(f"--theme.{name}={value}" for name, value in _THEME.items()),
+                *(f"--{name}={value}" for name, value in _SETTINGS.items()),
             ],
             check=True,
         )

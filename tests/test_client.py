@@ -1,11 +1,13 @@
 """Unit tests for the PyZData facade."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
 from pyzdata import PyZData
+from pyzdata.client import _configure_library_logging
 from pyzdata.exceptions import AuthenticationError, ConfigurationError
 
 
@@ -57,6 +59,36 @@ class TestEnctokenLogin:
     def test_no_credentials_raises_configuration_error(self, session, config):
         with pytest.raises(ConfigurationError):
             PyZData(config=config)
+
+
+class TestLogging:
+    """The library must not fight the application's logging setup."""
+
+    @pytest.fixture
+    def loggers(self, monkeypatch):
+        lib, root = logging.getLogger("pyzdata"), logging.getLogger()
+        monkeypatch.setattr(lib, "handlers", [])
+        monkeypatch.setattr(lib, "level", logging.NOTSET)
+        monkeypatch.setattr(root, "handlers", [logging.NullHandler()])  # app called basicConfig
+        return lib, root
+
+    def test_no_level_leaves_logging_to_the_app(self, loggers):
+        lib, _ = loggers
+        _configure_library_logging(None)
+        # Previously forced WARNING, which silenced the CLI's --verbose.
+        assert lib.level == logging.NOTSET and lib.handlers == []
+
+    def test_explicit_level_adds_no_second_handler(self, loggers):
+        lib, _ = loggers
+        _configure_library_logging("DEBUG")
+        assert lib.level == logging.DEBUG
+        assert lib.handlers == []  # the app's handler prints it — once
+
+    def test_handler_added_only_when_nothing_is_configured(self, loggers):
+        lib, root = loggers
+        root.handlers = []
+        _configure_library_logging("INFO")
+        assert len(lib.handlers) == 1
 
 
 class TestInstrumentsProperty:

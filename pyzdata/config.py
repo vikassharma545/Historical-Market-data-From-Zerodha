@@ -7,7 +7,6 @@ behaviour in CI/CD or production without touching source code.
 Example .env::
 
     PYZDATA_MAX_RETRIES=3
-    PYZDATA_MAX_WORKERS=8
     PYZDATA_CACHE_TTL_HOURS=12
     PYZDATA_LOG_LEVEL=DEBUG
 """
@@ -38,7 +37,8 @@ class Config:
     instruments_url: str = "https://api.kite.trade/instruments"
 
     # --------------------------------------------------------- Retry / HTTP
-    #: Total retry attempts for transient HTTP failures.
+    #: Quick retries per HTTP request for transient failures.  Candle
+    #: downloads additionally keep retrying until they succeed.
     max_retries: int = 5
     #: Exponential backoff factor (seconds).  With factor=1 the delays are
     #: 0s, 2s, 4s, 8s, 16s between consecutive retries.
@@ -56,16 +56,26 @@ class Config:
     #: platform default: ``~/.pyzdata/instruments.csv``.
     instruments_cache_path: Optional[str] = None
 
-    # --------------------------------------------------- Parallel downloads
-    #: Maximum worker threads for concurrent monthly fetches.
+    # ------------------------------------------------------------ Downloads
+    #: Unused — date windows are fetched one at a time.  Kept so existing
+    #: ``Config(max_workers=...)`` calls keep working.
     max_workers: int = 4
     #: Maximum API requests per second.  Zerodha's historical data endpoint
     #: typically allows ~3 req/s.  Set to ``0`` to disable throttling.
     rate_limit_per_second: float = 3.0
 
     # ----------------------------------------------------------------- Log
-    #: Python logging level name for the ``pyzdata`` logger hierarchy.
-    log_level: str = "WARNING"
+    #: Level for the ``pyzdata`` loggers, e.g. ``"DEBUG"``.  ``None`` leaves
+    #: it to the application's own ``logging`` setup.
+    log_level: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        # A bad value here would otherwise surface as the same error on
+        # every retry of a download that never ends.
+        if self.request_timeout <= 0:
+            raise ConfigurationError(f"request_timeout must be > 0, got {self.request_timeout}")
+        if self.max_retries < 0:
+            raise ConfigurationError(f"max_retries must be >= 0, got {self.max_retries}")
 
     # ---------------------------------------------------------------- factory
 
@@ -76,20 +86,20 @@ class Config:
         Any variable not set in the environment falls back to the dataclass
         default.  Example::
 
-            export PYZDATA_MAX_WORKERS=8
+            export PYZDATA_RATE_LIMIT=2
             export PYZDATA_LOG_LEVEL=DEBUG
         """
+        d = cls()  # defaults live in one place: the fields above
         return cls(
-            max_retries=_env_int("PYZDATA_MAX_RETRIES", 5),
-            backoff_factor=_env_float("PYZDATA_BACKOFF_FACTOR", 1.0),
-            request_timeout=_env_int("PYZDATA_TIMEOUT", 30),
-            max_workers=_env_int("PYZDATA_MAX_WORKERS", 4),
-            rate_limit_per_second=_env_float("PYZDATA_RATE_LIMIT", 3.0),
+            max_retries=_env_int("PYZDATA_MAX_RETRIES", d.max_retries),
+            backoff_factor=_env_float("PYZDATA_BACKOFF_FACTOR", d.backoff_factor),
+            request_timeout=_env_int("PYZDATA_TIMEOUT", d.request_timeout),
+            rate_limit_per_second=_env_float("PYZDATA_RATE_LIMIT", d.rate_limit_per_second),
             instruments_cache_path=os.getenv("PYZDATA_CACHE_PATH") or None,
             instruments_cache_ttl_hours=_env_float(
-                "PYZDATA_CACHE_TTL_HOURS", 24.0
+                "PYZDATA_CACHE_TTL_HOURS", d.instruments_cache_ttl_hours
             ),
-            log_level=os.getenv("PYZDATA_LOG_LEVEL", "WARNING").upper(),
+            log_level=(os.getenv("PYZDATA_LOG_LEVEL") or "").upper() or None,
         )
 
 

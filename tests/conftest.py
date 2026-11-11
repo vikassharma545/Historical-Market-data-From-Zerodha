@@ -18,14 +18,12 @@ def config(tmp_path) -> Config:
     * max_retries=0       — fail fast; no exponential backoff delays in tests
     * instruments_cache_ttl_hours=0  — always treat cache as stale
     * instruments_cache_path         — use a temp dir, never ~/.pyzdata
-    * max_workers=1                  — deterministic single-threaded execution
     """
     return Config(
         max_retries=0,
         request_timeout=5,
         instruments_cache_ttl_hours=0,
         instruments_cache_path=str(tmp_path / "instruments.csv"),
-        max_workers=1,
         rate_limit_per_second=0,
         log_level="ERROR",
     )

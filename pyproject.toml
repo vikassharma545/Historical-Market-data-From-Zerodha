@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77"]  # 77: first to accept `license = "MIT"` (PEP 639)
 build-backend = "setuptools.build_meta"
 
 [project]

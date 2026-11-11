@@ -14,9 +14,10 @@ import io
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Dict, Optional, Tuple
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -32,18 +33,15 @@ from pyzdata._web_helpers import (
     contract_table,
     file_stem,
     friendly_error,
+    greeting,
     instrument_options,
     period_to_dates,
     search_contracts,
 )
 from pyzdata._xlsx import EXCEL_MAX_ROWS, to_excel_bytes
 from pyzdata.downloader import _max_days
-from pyzdata.exceptions import (
-    AuthenticationError,
-    DataFetchError,
-    PartialDataError,
-    PyZDataError,
-)
+from pyzdata.exceptions import AuthenticationError, DataFetchError, PyZDataError
+from pyzdata.run_web import _SETTINGS
 
 _REPO_URL = "https://github.com/vikassharma545/Historical-Market-data-From-Zerodha"
 _DEFAULT_PERIOD = "1Y"
@@ -51,14 +49,28 @@ _OTHER = "Other"
 _CUSTOM = "Custom"
 _MAX_MATCHES = 200
 _TITLE = ":orange[:material/candlestick_chart:] PyZData"
-_CHART_COLOR = "#387ed1"
+_IST = timezone(timedelta(hours=5, minutes=30))  # India has no daylight saving
 
-# The only CSS in the app.  If Streamlit renames the test id the page merely
-# becomes full-width again — nothing breaks.
-_CSS = """
+# Colours come from the theme, so the chart and the CSS can't drift from it.
+_INK = _SETTINGS["theme.textColor"]
+_UP, _DOWN = _SETTINGS["theme.greenColor"], _SETTINGS["theme.redColor"]
+
+# The only CSS in the app: what the theme options can't express.  Each rule
+# is cosmetic — if Streamlit renames a test id the page just looks plainer.
+_CSS = f"""
 <style>
-.stApp { border-top: 3px solid #ff5722; }
-[data-testid="stMainBlockContainer"] { max-width: 1200px; padding-top: 2.5rem; }
+[data-testid="stMainBlockContainer"] {{ max-width: 1520px; padding-top: 2rem; }}
+/* Cards — bordered containers keyed "card_…" — and expanders are white on the grey page. */
+[class*="st-key-card_"], [data-testid="stExpander"] details {{ background: #ffffff; }}
+/* The chosen exchange, period and interval read as a dark tab. */
+[data-testid="stBaseButton-segmented_controlActive"],
+[data-testid="stBaseButton-pillsActive"] {{
+    background: {_INK}; border-color: {_INK}; color: #ffffff;
+}}
+/* Prices are numbers to compare: set them in the monospace face. */
+[data-testid="stMetricValue"], [data-testid="stMetricDelta"] {{
+    font-family: {_SETTINGS["theme.codeFont"]};
+}}
 </style>
 """
 
@@ -77,38 +89,23 @@ The enctoken changes every time you log in to Kite. If it stops working, copy a 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_login() -> None:
-    _, middle, _ = st.columns([1, 2, 1])
+    _, middle, _ = st.columns([1, 1.6, 1])
     with middle:
         st.title(_TITLE)
-        st.markdown(
-            "Download historical prices for any stock, index, future or option on "
-            "Zerodha — as CSV or Excel. Free, no API subscription."
+        st.caption(
+            "Historical prices for any stock, index, future or option on Zerodha — "
+            "as CSV or Excel. Free, no API subscription."
         )
 
-        method = st.segmented_control(
-            "Log in with",
-            ["Enctoken", "User ID & password"],
-            default="Enctoken",
-            key="login_method",
-        ) or "Enctoken"
-
-        # A form, so pressing Enter submits and typing doesn't rerun the page.
-        with st.form("login"):
-            if method == "Enctoken":
-                credentials = {
-                    "enctoken": st.text_input(
-                        "Enctoken", type="password", placeholder="Paste your enctoken",
-                    ),
-                }
-            else:
-                credentials = {
-                    "user_id": st.text_input("Zerodha user ID", placeholder="AB1234"),
-                    "password": st.text_input("Password", type="password"),
-                    "totp": st.text_input(
-                        "TOTP code", max_chars=6, placeholder="6 digits from your authenticator app",
-                    ),
-                }
-            submitted = st.form_submit_button("Log in", type="primary", width="stretch")
+        with st.container(border=True, key="card_login"):
+            st.subheader("Log in to Zerodha")
+            method = st.segmented_control(
+                "Log in with",
+                ["Enctoken", "User ID & password"],
+                default="Enctoken",
+                key="login_method",
+            ) or "Enctoken"
+            credentials, submitted = _login_form(method)
 
         if submitted:
             credentials = {name: value.strip() for name, value in credentials.items()}
@@ -122,9 +119,32 @@ def render_login() -> None:
         with st.expander("Is this safe?"):
             st.markdown(
                 "- Your login details go **only to Zerodha's servers**, straight from this computer.\n"
-                "- Nothing is written to disk — the session ends when you close this tab.\n"
+                "- The app listens on this computer only — nobody else on your network can open it.\n"
+                "- Login details are never written to disk; only Zerodha's public instrument list "
+                "is cached (in `~/.pyzdata`).\n"
                 f"- The code is open source: [read it on GitHub]({_REPO_URL})."
             )
+
+
+def _login_form(method: str) -> Tuple[Dict[str, str], bool]:
+    # A form, so pressing Enter submits and typing doesn't rerun the page.
+    with st.form("login", border=False):
+        if method == "Enctoken":
+            credentials = {
+                "enctoken": st.text_input(
+                    "Enctoken", type="password", placeholder="Paste your enctoken",
+                ),
+            }
+        else:
+            credentials = {
+                "user_id": st.text_input("Zerodha user ID", placeholder="AB1234"),
+                "password": st.text_input("Password", type="password"),
+                "totp": st.text_input(
+                    "TOTP code", max_chars=6, placeholder="6 digits from your authenticator app",
+                ),
+            }
+        submitted = st.form_submit_button("Log in", type="primary", width="stretch")
+    return credentials, submitted
 
 
 def _log_in(credentials: Dict[str, str]) -> None:
@@ -246,14 +266,19 @@ def _pick_interval() -> Tuple[str, Interval]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_downloader(client: PyZData) -> None:
-    title, account = st.columns([4, 1], vertical_alignment="bottom")
+    now = datetime.now(_IST)
+    name = (client.user_name or "").split(" ")[0]
+    title, account = st.columns([5, 1], vertical_alignment="center")
     title.title(_TITLE)
-    account.caption(f"Logged in as **{client.user_name or 'Zerodha user'}**")
+    title.caption(
+        f"{greeting(now)}{', ' + name if name else ''} · {now:%d %b %Y} · all times IST"
+    )
     account.button("Log out", on_click=_log_out, width="stretch")
 
-    controls, output = st.columns([2, 3], gap="large")
+    controls, output = st.columns([2, 3], gap="medium")
 
-    with controls:
+    with controls, st.container(border=True, key="card_controls"):
+        st.subheader("New download")
         exchange, symbol = _pick_instrument(client)
         dates = _pick_dates()
         interval_label, interval = _pick_interval()
@@ -294,15 +319,18 @@ def render_downloader(client: PyZData) -> None:
         if "result" in st.session_state:
             _render_result(st.session_state["result"])
         elif not notice:
-            st.info(
-                "Pick an instrument, a period and an interval, then press **Download**. "
-                "The price chart and the CSV / Excel buttons will appear here.",
-                icon=":material/show_chart:",
-            )
+            with st.container(border=True, key="card_empty"):
+                st.subheader("Your download")
+                st.markdown(
+                    ":gray[Nothing downloaded yet. Pick an instrument, a period and an "
+                    "interval, then press **Download** — the price chart and the CSV and "
+                    "Excel buttons appear here.]",
+                    text_alignment="center",
+                )
 
 
 def _new_job(work: Callable[[Callable[[int, int], None]], pd.DataFrame], symbol: str,
-             interval_label: str) -> dict:
+             interval_label: str, exchange: str = "") -> dict:
     """Start *work* on a background thread and return the job that tracks it.
 
     Why a thread: Streamlit aborts the running script at its next ``st.`` call
@@ -314,7 +342,10 @@ def _new_job(work: Callable[[Callable[[int, int], None]], pd.DataFrame], symbol:
     *work* receives a ``report(done, total)`` callback.  It must not call
     Streamlit — it is not on the script thread.
     """
-    job = {"symbol": symbol, "interval_label": interval_label, "progress": (0, 1)}
+    job = {
+        "symbol": symbol, "interval_label": interval_label, "exchange": exchange,
+        "progress": (0, 1),
+    }
     started = time.perf_counter()
 
     def report(done: int, total: int) -> None:
@@ -350,7 +381,7 @@ def _start_download(
 
     st.session_state.pop("result", None)
     st.session_state.pop("notice", None)
-    st.session_state["job"] = _new_job(work, symbol, interval_label)
+    st.session_state["job"] = _new_job(work, symbol, interval_label, exchange)
     st.rerun()  # redraw with the button disabled, then attach to the job
 
 
@@ -377,22 +408,17 @@ def _attach(job: dict) -> None:
 def _outcome(job: dict) -> Tuple[Optional[dict], Optional[Tuple[str, str]]]:
     """``(result, notice)`` of a finished job.  Pure — no Streamlit calls."""
     symbol, interval_label = job["symbol"], job["interval_label"]
-    warning = None
     try:
         df = job["future"].result()
-    except PartialDataError as exc:
-        df = exc.partial_data
-        gaps = ", ".join(f"{start:%d %b %Y} → {end:%d %b %Y}" for start, end in exc.failed_ranges)
-        warning = (
-            f"Some of the data could not be downloaded and is **missing** from the "
-            f"file: {gaps}. Click Download again to retry."
-        )
     except DataFetchError as exc:
+        # The download retries everything else, so this is a logout (or a cancel).
         if "expired" in str(exc):
-            return None, ("error", "Your Zerodha session has expired. Log out, then log in again.")
-        return None, ("error", f"Download failed: {exc}. Wait a moment and try again.")
+            return None, ("error", "Zerodha logged you out. Log out here, then log in again.")
+        return None, ("error", f"Download failed: {exc}")
     except PyZDataError as exc:
         return None, ("error", str(exc))
+    except Exception as exc:  # anything else must not leave the page stuck on "Downloading …"
+        return None, ("error", f"Download failed unexpectedly: {exc!r}")
 
     if df.empty:
         return None, ("warning", (
@@ -400,40 +426,80 @@ def _outcome(job: dict) -> Tuple[Optional[dict], Optional[Tuple[str, str]]]:
             "It may not have been listed yet — try a different period."
         ))
 
+    first_close, last_close = float(df["close"].iloc[0]), float(df["close"].iloc[-1])
     # Keep only bytes and small frames: Streamlit holds session state in
     # memory for the whole session, and a 1-minute download can be huge.
     return {
-        "title": f"{symbol} · {interval_label}",
+        "symbol": symbol,
+        "badges": [b for b in (job.get("exchange"), interval_label) if b],
         "rows": len(df),
         "seconds": job["seconds"],
         "first": df["datetime"].min(),
         "last": df["datetime"].max(),
-        "last_close": float(df["close"].iloc[-1]),
+        "last_close": last_close,
+        "change": last_close - first_close,
+        "change_pct": (last_close / first_close - 1) * 100 if first_close else 0.0,
         "stem": file_stem(symbol, df, interval_label),
         "csv": df.to_csv(index=False).encode("utf-8"),
         "chart": chart_frame(df),
         "preview": df.head(10),
-        "warning": warning,
     }, None
 
 
 def _render_result(result: dict) -> None:
-    st.subheader(result["title"])
-    # A caption, not a metric: the date range is too long for a metric column.
+    with st.container(border=True, key="card_result"):
+        _render_result_body(result)
+
+
+def _price_chart(chart: pd.DataFrame, color: str) -> alt.LayerChart:
+    """The closing price as a line over a faint tint, scaled to the prices.
+
+    Streamlit's own area chart fills solid down to zero, which flattens a
+    1,400 → 990 fall into a sliver at the top.
+    """
+    data = chart.reset_index()
+    base = alt.Chart(data).encode(
+        x=alt.X("datetime:T", title=None),
+        y=alt.Y("close:Q", title=None, scale=alt.Scale(zero=False)),
+    )
+    tint = base.mark_area(color=color, opacity=0.08).encode(
+        y2=alt.datum(float(data["close"].min()))
+    )
+    line = base.mark_line(color=color, strokeWidth=1.5).encode(
+        tooltip=[
+            alt.Tooltip("datetime:T", title="Time"),
+            alt.Tooltip("close:Q", title="Close", format=",.2f"),
+        ],
+    )
+    # Transparent, or the theme paints the page's grey inside the white card.
+    return (tint + line).configure(background="transparent")
+
+
+def _render_result_body(result: dict) -> None:
+    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+        st.header(result["symbol"], width="content")
+        for badge in result["badges"]:
+            st.badge(badge, color="gray")
+
+    # The one big number on the page: where the price ended, and how far it
+    # moved over the period — green up, red down, like the chart below it.
+    st.metric(
+        "Last close",
+        f"{result['last_close']:,.2f}",
+        delta=f"{result['change']:+,.2f} ({result['change_pct']:+.2f}%)",
+        delta_description=f"since {result['first']:%d %b %Y}",
+    )
     # The fetch time is shown because it is nearly all of the wait, and it is
     # Zerodha's speed and rate limit (3 requests/s), not this app.
     st.caption(
-        f"{result['first']:%d %b %Y} → {result['last']:%d %b %Y}"
+        f"{result['rows']:,} rows · {result['first']:%d %b %Y} → {result['last']:%d %b %Y}"
         f" · fetched from Zerodha in {result['seconds']:.0f} s"
     )
-    if result["warning"]:
-        st.warning(result["warning"])
 
-    rows, close = st.columns(2)
-    rows.metric("Rows", f"{result['rows']:,}")
-    close.metric("Last close", f"{result['last_close']:,.2f}")
-
-    st.line_chart(result["chart"], height=320, color=_CHART_COLOR)
+    st.altair_chart(
+        _price_chart(result["chart"], _UP if result["change"] >= 0 else _DOWN),
+        width="stretch", height=300,
+    )
 
     csv = result["csv"]
     left, right = st.columns(2)
